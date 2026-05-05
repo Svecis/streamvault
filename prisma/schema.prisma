@@ -1,0 +1,49 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           Int       @id @default(autoincrement())
+  label        String?
+  sessionToken String?   @unique
+  inviteCode   String?
+  createdAt    DateTime  @default(now())
+  lastSeen     DateTime  @default(now())
+  torrents     Torrent[]
+  files        File[]
+}
+
+model InviteCode {
+  id        Int      @id @default(autoincrement())
+  code      String   @unique
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model Torrent {
+  id       Int      @id @default(autoincrement())
+  infoHash String   @unique
+  name     String
+  magnet   String?
+  size     Float    @default(0)
+  addedBy  Int?
+  addedAt  DateTime @default(now())
+  user     User?    @relation(fields: [addedBy], references: [id])
+}
+
+model File {
+  id           String   @id
+  filename     String
+  originalName String
+  size         Float
+  mimeType     String
+  hasSubtitle  Boolean  @default(false)
+  addedBy      Int?
+  addedAt      DateTime @default(now())
+  user         User?    @relation(fields: [addedBy], references: [id])
+}

@@ -1,0 +1,11 @@
+{
+  "name": "torrent-service",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch index.ts"
+  },
+  "dependencies": {
+    "webtorrent": "^2.8.5",
+    "fastify": "^5.8.5"
+  }
+}

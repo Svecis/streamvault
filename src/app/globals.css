@@ -1,0 +1,201 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-sv-accent: var(--sv-accent);
+  --color-sv-surface: var(--sv-surface);
+  --color-sv-border: var(--sv-border);
+  --color-sv-text: var(--sv-text);
+  --color-sv-text-muted: var(--sv-text-muted);
+  --color-sv-hover: var(--sv-hover);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  --radius: 0.5rem;
+  /* StreamVault dark theme - always dark */
+  --background: #0d0d0d;
+  --foreground: #e8e8e8;
+  --card: #141414;
+  --card-foreground: #e8e8e8;
+  --popover: #141414;
+  --popover-foreground: #e8e8e8;
+  --primary: #e8552a;
+  --primary-foreground: #ffffff;
+  --secondary: #1a1a1a;
+  --secondary-foreground: #e8e8e8;
+  --muted: #1a1a1a;
+  --muted-foreground: #666666;
+  --accent: #e8552a;
+  --accent-foreground: #ffffff;
+  --destructive: #dc2626;
+  --border: #222222;
+  --input: #222222;
+  --ring: #e8552a;
+
+  /* StreamVault custom vars */
+  --sv-accent: #e8552a;
+  --sv-surface: #141414;
+  --sv-border: #222222;
+  --sv-text: #e8e8e8;
+  --sv-text-muted: #666666;
+  --sv-hover: #444444;
+
+  --chart-1: #e8552a;
+  --chart-2: #4f9cf9;
+  --chart-3: #22c55e;
+  --chart-4: #eab308;
+  --chart-5: #a855f7;
+
+  --sidebar: #141414;
+  --sidebar-foreground: #e8e8e8;
+  --sidebar-primary: #e8552a;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #1a1a1a;
+  --sidebar-accent-foreground: #e8e8e8;
+  --sidebar-border: #222222;
+  --sidebar-ring: #e8552a;
+}
+
+.dark {
+  --background: #0d0d0d;
+  --foreground: #e8e8e8;
+  --card: #141414;
+  --card-foreground: #e8e8e8;
+  --popover: #141414;
+  --popover-foreground: #e8e8e8;
+  --primary: #e8552a;
+  --primary-foreground: #ffffff;
+  --secondary: #1a1a1a;
+  --secondary-foreground: #e8e8e8;
+  --muted: #1a1a1a;
+  --muted-foreground: #666666;
+  --accent: #e8552a;
+  --accent-foreground: #ffffff;
+  --destructive: #dc2626;
+  --border: #222222;
+  --input: #222222;
+  --ring: #e8552a;
+  --sv-accent: #e8552a;
+  --sv-surface: #141414;
+  --sv-border: #222222;
+  --sv-text: #e8e8e8;
+  --sv-text-muted: #666666;
+  --sv-hover: #444444;
+  --sidebar: #141414;
+  --sidebar-foreground: #e8e8e8;
+  --sidebar-primary: #e8552a;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #1a1a1a;
+  --sidebar-accent-foreground: #e8e8e8;
+  --sidebar-border: #222222;
+  --sidebar-ring: #e8552a;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: system-ui, -apple-system, sans-serif;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0d0d0d;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #444;
+}
+
+/* Video player custom styles */
+.plyr {
+  --plyr-color-main: #e8552a;
+  --plyr-video-background: #000;
+  --plyr-menu-background: #141414;
+  --plyr-menu-color: #e8e8e8;
+  --plyr-badge-background: #e8552a;
+  --plyr-badge-text-color: #fff;
+  --plyr-badge-border-radius: 2px;
+  --plyr-font-family: system-ui, -apple-system, sans-serif;
+  --plyr-control-radius: 4px;
+  --plyr-range-track-height: 4px;
+  --plyr-range-thumb-height: 12px;
+  --plyr-range-fill-background: #e8552a;
+}
+
+/* Progress bar for torrents */
+.torrent-progress {
+  background: #222;
+  border-radius: 2px;
+  overflow: hidden;
+  height: 4px;
+}
+
+.torrent-progress-bar {
+  background: #e8552a;
+  height: 100%;
+  transition: width 0.5s ease;
+}
+
+/* Upload drop zone */
+.drop-zone {
+  border: 2px dashed #333;
+  transition: border-color 0.2s;
+}
+
+.drop-zone:hover,
+.drop-zone.drag-over {
+  border-color: #e8552a;
+}
