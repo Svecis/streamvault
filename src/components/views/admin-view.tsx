@@ -12,6 +12,7 @@ import {
   FileVideo,
 } from 'lucide-react'
 import { useAppStore } from '@/store/app-store'
+import { apiFetch } from '@/lib/api'
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -126,10 +127,10 @@ export function AdminView() {
         const headers = { 'x-admin-password': pw }
 
         const [statsRes, usersRes, torrentsRes, filesRes] = await Promise.all([
-          fetch('/api/admin/stats', { headers }),
-          fetch('/api/admin/users', { headers }),
-          fetch('/api/torrent/list', { headers }),
-          fetch('/api/files', { headers }),
+          apiFetch('/api/admin/stats', { headers }),
+          apiFetch('/api/admin/users', { headers }),
+          apiFetch('/api/torrent/list', { headers }),
+          apiFetch('/api/files', { headers }),
         ])
 
         if (!statsRes.ok || !usersRes.ok) {
@@ -166,7 +167,7 @@ export function AdminView() {
     setAuthLoading(true)
     setAuthError('')
     try {
-      const res = await fetch('/api/admin/stats', {
+      const res = await apiFetch('/api/admin/stats', {
         headers: { 'x-admin-password': password },
       })
       if (res.ok) {
@@ -210,7 +211,7 @@ export function AdminView() {
   const handleGenerateInvite = async () => {
     setInviteLoading(true)
     try {
-      const res = await fetch('/api/admin/invite', {
+      const res = await apiFetch('/api/admin/invite', {
         method: 'POST',
         headers: { 'x-admin-password': password },
       })
@@ -244,7 +245,7 @@ export function AdminView() {
   const handleDeleteTorrent = async (infoHash: string) => {
     setDeleteLoading(infoHash)
     try {
-      await fetch(`/api/admin/torrents/${infoHash}`, {
+      await apiFetch(`/api/admin/torrents/${infoHash}`, {
         method: 'DELETE',
         headers: { 'x-admin-password': password },
       })
@@ -261,7 +262,7 @@ export function AdminView() {
   const handleDeleteFile = async (id: string) => {
     setDeleteLoading(id)
     try {
-      await fetch(`/api/admin/files/${id}`, {
+      await apiFetch(`/api/admin/files/${id}`, {
         method: 'DELETE',
         headers: { 'x-admin-password': password },
       })

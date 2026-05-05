@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback } from 'react'
 import { Upload, ArrowLeft, FileVideo, Subtitles, X } from 'lucide-react'
 import { useAppStore } from '@/store/app-store'
+import { apiFetch } from '@/lib/api'
 
 const VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v']
 const VIDEO_ACCEPT = VIDEO_EXTENSIONS.join(',')
@@ -190,7 +191,7 @@ export function UploadView() {
             const subFormData = new FormData()
             subFormData.append('subtitle', subtitleFile)
 
-            fetch(`/api/subtitle/${data.id}`, {
+            apiFetch(`/api/subtitle/${data.id}`, {
               method: 'POST',
               body: subFormData,
             })
@@ -233,6 +234,7 @@ export function UploadView() {
     const formData = new FormData()
     formData.append('file', videoFile)
     xhr.open('POST', '/api/upload')
+    xhr.withCredentials = true
     xhr.send(formData)
   }, [videoFile, subtitleFile, navigateToWatch])
 

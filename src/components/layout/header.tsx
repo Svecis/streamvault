@@ -1,13 +1,15 @@
 'use client'
 
 import { useAppStore } from '@/store/app-store'
+import { apiFetch, clearSession } from '@/lib/api'
 import { LogOut, Upload, Shield, Film } from 'lucide-react'
 
 export function Header() {
   const { user, setView, setUser, setIsAdmin } = useAppStore()
 
   const handleLogout = async () => {
-    await fetch('/api/auth/logout', { method: 'POST' })
+    await apiFetch('/api/auth/logout', { method: 'POST' })
+    clearSession()
     setUser(null)
     setIsAdmin(false)
     setView('login')

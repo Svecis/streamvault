@@ -25,7 +25,8 @@ export async function GET(request: NextRequest) {
         label: user.label,
         inviteCode: user.inviteCode,
         createdAt: user.createdAt,
-        lastSeen: new Date(), // Return the updated timestamp
+        lastSeen: new Date(),
+        sessionToken: user.sessionToken,
       },
     })
   } catch (error) {

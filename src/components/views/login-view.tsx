@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from 'react'
 import { useAppStore } from '@/store/app-store'
+import { apiFetch, storeSession } from '@/lib/api'
 
 export function LoginView() {
   const setUser = useAppStore((s) => s.setUser)
@@ -23,7 +24,7 @@ export function LoginView() {
     setSubmitting(true)
 
     try {
-      const res = await fetch('/api/auth/join', {
+      const res = await apiFetch('/api/auth/join', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: code.trim(), label: 'User' }),
@@ -37,6 +38,7 @@ export function LoginView() {
       const data = await res.json()
 
       if (data.success && data.user) {
+        if (data.sessionToken) storeSession(data.sessionToken)
         setUser(data.user)
         setView('library')
       } else {

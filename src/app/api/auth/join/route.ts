@@ -44,15 +44,16 @@ export async function POST(request: NextRequest) {
       })
     })
 
-    // Create response with user data
+    // Create response with user data + session token (for localStorage fallback)
     const response = NextResponse.json({
       success: true,
       user: { id: user.id, label: user.label },
+      sessionToken,
     })
 
     // Set session cookie
     response.cookies.set('sv_session', sessionToken, {
-      httpOnly: true,
+      httpOnly: false,
       path: '/',
       maxAge: 30 * 24 * 60 * 60, // 30 days
       sameSite: 'lax',

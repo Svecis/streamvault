@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useAppStore } from '@/store/app-store'
+import { apiFetch } from '@/lib/api'
 import {
   ArrowLeft, Share2, Upload, Users, ArrowDownToLine, Signal
 } from 'lucide-react'
@@ -73,7 +74,7 @@ export function WatchView() {
     const fetchInfo = async () => {
       try {
         if (watchParams.type === 'torrent') {
-          const res = await fetch('/api/torrent/list')
+          const res = await apiFetch('/api/torrent/list')
           if (res.ok) {
             const data = await res.json()
             const torrent = (data.torrents || []).find(
@@ -88,7 +89,7 @@ export function WatchView() {
             }
           }
         } else {
-          const res = await fetch('/api/files')
+          const res = await apiFetch('/api/files')
           if (res.ok) {
             const data = await res.json()
             const file = (data.files || []).find(
@@ -120,7 +121,7 @@ export function WatchView() {
 
     const checkSubtitle = async () => {
       try {
-        const res = await fetch(`/api/subtitle/${watchParams.id}`)
+        const res = await apiFetch(`/api/subtitle/${watchParams.id}`)
         if (res.ok) {
           setHasSubtitle(true)
         }
@@ -251,7 +252,7 @@ export function WatchView() {
 
       const poll = async () => {
         try {
-          const res = await fetch(`/api/torrent/status/${infoHash}`)
+          const res = await apiFetch(`/api/torrent/status/${infoHash}`)
           if (res.ok) {
             const data = await res.json()
             setTorrentStats({
@@ -298,7 +299,7 @@ export function WatchView() {
         const formData = new FormData()
         formData.append('subtitle', file)
 
-        const res = await fetch(`/api/subtitle/${watchParams.id}`, {
+        const res = await apiFetch(`/api/subtitle/${watchParams.id}`, {
           method: 'POST',
           body: formData,
         })

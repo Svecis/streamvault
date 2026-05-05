@@ -20,12 +20,18 @@ function parseCookies(request: Request): Map<string, string> {
 
 /**
  * Get the current session user from the request.
- * Reads the sv_session cookie, looks up the user by session token.
- * Returns the user record or null if not found / no cookie.
+ * Checks both the sv_session cookie and x-session-token header.
+ * Returns the user record or null if not found / no token.
  */
 export async function getSessionUser(request: Request) {
+  // Try cookie first
   const cookies = parseCookies(request)
-  const sessionToken = cookies.get('sv_session')
+  let sessionToken = cookies.get('sv_session')
+
+  // Fallback to custom header (for sandbox environments where cookies may not work)
+  if (!sessionToken) {
+    sessionToken = request.headers.get('x-session-token')
+  }
 
   if (!sessionToken) {
     return null

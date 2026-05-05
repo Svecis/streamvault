@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { useAppStore, TorrentInfo, FileInfo } from '@/store/app-store'
+import { apiFetch } from '@/lib/api'
 import {
   Play, Trash2, Plus, FileVideo, Users, ArrowDownToLine,
   Loader2, X, Magnet
@@ -25,8 +26,8 @@ export function LibraryView() {
   const fetchData = useCallback(async () => {
     try {
       const [torrentsRes, filesRes] = await Promise.all([
-        fetch('/api/torrent/list'),
-        fetch('/api/files')
+        apiFetch('/api/torrent/list'),
+        apiFetch('/api/files')
       ])
       if (torrentsRes.ok) {
         const tData = await torrentsRes.json()
@@ -55,7 +56,7 @@ export function LibraryView() {
     const fetchProgress = async () => {
       for (const t of torrents) {
         try {
-          const res = await fetch(`/api/torrent/status/${t.infoHash}`)
+          const res = await apiFetch(`/api/torrent/status/${t.infoHash}`)
           if (res.ok) {
             const data = await res.json()
             if (data.active) {
@@ -92,7 +93,7 @@ export function LibraryView() {
     setAddError('')
 
     try {
-      const res = await fetch('/api/torrent/add', {
+      const res = await apiFetch('/api/torrent/add', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ magnet: magnetLink.trim() }),
@@ -124,7 +125,7 @@ export function LibraryView() {
       const formData = new FormData()
       formData.append('torrent', file)
 
-      const res = await fetch('/api/torrent/add', {
+      const res = await apiFetch('/api/torrent/add', {
         method: 'POST',
         body: formData,
       })
@@ -146,7 +147,7 @@ export function LibraryView() {
   const handleDeleteTorrent = async (infoHash: string) => {
     setDeletingId(infoHash)
     try {
-      await fetch(`/api/torrent/${infoHash}`, { method: 'DELETE' })
+      await apiFetch(`/api/torrent/${infoHash}`, { method: 'DELETE' })
       setTorrents(prev => prev.filter(t => t.infoHash !== infoHash))
     } catch (err) {
       console.error('Delete failed:', err)
@@ -158,7 +159,7 @@ export function LibraryView() {
   const handleDeleteFile = async (id: string) => {
     setDeletingId(id)
     try {
-      await fetch(`/api/admin/files/${id}`, {
+      await apiFetch(`/api/admin/files/${id}`, {
         method: 'DELETE',
         headers: { 'x-admin-password': 'admin123' },
       })

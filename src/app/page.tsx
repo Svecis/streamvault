@@ -8,6 +8,7 @@ import { WatchView } from '@/components/views/watch-view'
 import { UploadView } from '@/components/views/upload-view'
 import { AdminView } from '@/components/views/admin-view'
 import { Header } from '@/components/layout/header'
+import { apiFetch, storeSession, clearSession } from '@/lib/api'
 
 export default function Home() {
   const { view, user, setUser, setView, setLoading } = useAppStore()
@@ -17,12 +18,16 @@ export default function Home() {
     const checkSession = async () => {
       setLoading(true)
       try {
-        const res = await fetch('/api/auth/session')
+        const res = await apiFetch('/api/auth/session')
         if (res.ok) {
           const data = await res.json()
+          if (data.user?.sessionToken) {
+            storeSession(data.user.sessionToken)
+          }
           setUser(data.user)
           setView('library')
         } else {
+          clearSession()
           setUser(null)
           setView('login')
         }
@@ -41,14 +46,14 @@ export default function Home() {
     const params = new URLSearchParams(window.location.search)
     const code = params.get('code')
     if (code) {
-      // Auto-join with invite code from URL
-      fetch('/api/auth/join', {
+      apiFetch('/api/auth/join', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code, label: 'User' }),
       }).then(async (res) => {
         if (res.ok) {
           const data = await res.json()
+          if (data.sessionToken) storeSession(data.sessionToken)
           setUser(data.user)
           setView('library')
           window.history.replaceState({}, '', '/')
