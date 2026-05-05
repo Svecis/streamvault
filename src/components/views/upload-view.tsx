@@ -235,6 +235,11 @@ export function UploadView() {
     formData.append('file', videoFile)
     xhr.open('POST', '/api/upload')
     xhr.withCredentials = true
+    // Send session token via header (cookies may not work through gateway)
+    const token = localStorage.getItem('sv_session')
+    if (token) {
+      xhr.setRequestHeader('x-session-token', token)
+    }
     xhr.send(formData)
   }, [videoFile, subtitleFile, navigateToWatch])
 
