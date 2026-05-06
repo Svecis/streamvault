@@ -1,4 +1,3 @@
-import { spawn } from 'child_process'
 import path from 'path'
 
 /**
@@ -38,6 +37,9 @@ export async function ensureTorrentService(): Promise<void> {
   const tsCwd = path.resolve(process.cwd(), 'mini-services/torrent-service')
 
   console.log('[torrent-client] Starting torrent service...')
+
+  // Dynamic import for child_process to avoid Next.js build bundling issues
+  const { spawn } = await import('child_process')
 
   const child = spawn('node', ['--import', 'tsx', tsPath], {
     cwd: tsCwd,
