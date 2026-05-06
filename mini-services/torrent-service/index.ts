@@ -2,6 +2,7 @@ import Fastify from 'fastify'
 import WebTorrent from 'webtorrent'
 import path from 'path'
 import fs from 'fs'
+import { execSync } from 'child_process'
 
 const PORT = parseInt(process.env.PORT || '3001', 10)
 const TORRENT_DIR = path.resolve(process.env.TORRENT_DIR || '../../torrents')
@@ -162,16 +163,23 @@ function addTorrentToClient(magnet: string): Promise<any> {
 
 // Restore torrents from database on startup
 async function restoreTorrents() {
-  const DB_PATH = path.resolve(TORRENT_DIR, '../db/production.db')
+  // Support DATABASE_URL env var (e.g. file:/opt/streamvault/db/production.db)
+  // or fall back to relative path from TORRENT_DIR
+  let DB_PATH: string
+  if (process.env.DATABASE_URL) {
+    DB_PATH = process.env.DATABASE_URL.replace(/^file:/, '')
+  } else {
+    DB_PATH = path.resolve(TORRENT_DIR, '../db/production.db')
+  }
+
   if (!fs.existsSync(DB_PATH)) {
-    console.log('No database found, skipping torrent restoration')
+    console.log(`No database found at ${DB_PATH}, skipping torrent restoration`)
     return
   }
 
+  console.log(`Restoring torrents from database: ${DB_PATH}`)
+
   try {
-    // Use better-sqlite3 or just read the file directly
-    // Since we can't import prisma here, we'll use a simple approach
-    const { execSync } = require('child_process')
     let rows: any[] = []
     try {
       const output = execSync(`sqlite3 "${DB_PATH}" "SELECT infoHash, name, magnet FROM Torrent ORDER BY addedAt DESC;"`, { encoding: 'utf-8' })

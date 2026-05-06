@@ -14,6 +14,7 @@ StartLimitBurst=10
 StartLimitIntervalSec=60
 Environment=PORT=3001
 Environment=TORRENT_DIR=/opt/streamvault/torrents
+Environment=DATABASE_URL=file:/opt/streamvault/db/production.db
 Environment=NODE_ENV=production
 LimitNOFILE=65536
 MemoryMax=3G
