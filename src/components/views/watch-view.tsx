@@ -217,7 +217,7 @@ export function WatchView() {
     setHlsLoading(true)
 
     const video = videoRef.current
-    const hlsUrl = `/api/torrent/hls/${watchParams.id}/stream.m3u8`
+    const hlsUrl = `/api/torrent/hls/${watchParams.id}`
 
     // @ts-ignore
     if (window.Hls && window.Hls.isSupported()) {
