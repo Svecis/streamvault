@@ -7,7 +7,7 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
-  serverExternalPackages: ["child_process", "fs", "path"],
+  serverExternalPackages: ["fs", "path"],
 };
 
 export default nextConfig;

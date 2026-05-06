@@ -8,50 +8,34 @@ import path from 'path'
 export const TORRENT_SERVICE_URL =
   process.env.TORRENT_SERVICE_URL || 'http://127.0.0.1:3001'
 
-// Singleton: ensure we only spawn the torrent service once
-let torrentServiceStarted = false
+// Singleton: track if we've verified the torrent service is reachable
+let torrentServiceVerified = false
 
 /**
- * Ensures the torrent service is running by spawning it as a child process
- * if it's not already active. Called lazily from API routes.
+ * Ensures the torrent service is running.
+ * In production: the service is managed by systemd, so we just verify it's reachable.
+ * In development: logs a warning if the service isn't running.
  */
 export async function ensureTorrentService(): Promise<void> {
-  if (torrentServiceStarted) return
+  if (torrentServiceVerified) return
 
-  // First check if it's already running (e.g., in production via systemd)
+  // Check if the torrent service is already running
   try {
     const res = await fetch(`${TORRENT_SERVICE_URL}/health`, {
       signal: AbortSignal.timeout(2000),
       cache: 'no-store',
     })
     if (res.ok) {
-      torrentServiceStarted = true
+      torrentServiceVerified = true
       return
     }
   } catch {
-    // Service not reachable, need to start it
+    // Service not reachable
   }
 
-  // Spawn the torrent service as a detached child process
-  const tsPath = path.resolve(process.cwd(), 'mini-services/torrent-service/index.ts')
-  const tsCwd = path.resolve(process.cwd(), 'mini-services/torrent-service')
-
-  console.log('[torrent-client] Starting torrent service...')
-
-  // Dynamic import for child_process to avoid Next.js build bundling issues
-  const { spawn } = await import('child_process')
-
-  const child = spawn('node', ['--import', 'tsx', tsPath], {
-    cwd: tsCwd,
-    env: { ...process.env, PORT: '3001' },
-    detached: true,
-    stdio: 'ignore',
-  })
-
-  child.unref()
-
-  // Wait for the service to become available
-  for (let i = 0; i < 30; i++) {
+  // Service isn't running — in production, systemd should handle this.
+  // Try waiting a few seconds in case it's still starting up.
+  for (let i = 0; i < 10; i++) {
     await new Promise(resolve => setTimeout(resolve, 1000))
     try {
       const res = await fetch(`${TORRENT_SERVICE_URL}/health`, {
@@ -60,13 +44,13 @@ export async function ensureTorrentService(): Promise<void> {
       })
       if (res.ok) {
         console.log('[torrent-client] Torrent service is ready')
-        torrentServiceStarted = true
+        torrentServiceVerified = true
         return
       }
     } catch {
-      // Not ready yet
+      // Still not ready
     }
   }
 
-  console.error('[torrent-client] Timed out waiting for torrent service to start')
+  console.error('[torrent-client] Torrent service is not reachable at', TORRENT_SERVICE_URL)
 }
