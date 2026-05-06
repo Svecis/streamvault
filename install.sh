@@ -255,7 +255,7 @@ StartLimitIntervalSec=60
 Environment=PORT=3001
 Environment=TORRENT_DIR=${APP_DIR}/torrents
 Environment=NODE_ENV=production
-LimitNOFile=65536
+LimitNOFILE=65536
 MemoryMax=3G
 CPUQuota=150%
 StandardOutput=journal
