@@ -7,7 +7,7 @@ function checkAdminAuth(request: NextRequest): boolean {
   return providedPassword === adminPassword
 }
 
-const TORRENT_SERVICE_URL = 'http://localhost:3001'
+const TORRENT_SERVICE_URL = 'http://127.0.0.1:3001'
 
 export async function DELETE(
   request: NextRequest,

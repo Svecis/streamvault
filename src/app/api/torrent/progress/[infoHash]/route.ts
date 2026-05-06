@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server'
 import { getSessionUser } from '@/lib/auth'
 
-const TORRENT_SERVICE = 'http://localhost:3001'
+const TORRENT_SERVICE = 'http://127.0.0.1:3001'
 
 export async function GET(
   request: NextRequest,
