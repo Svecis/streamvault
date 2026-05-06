@@ -67,11 +67,8 @@ function extractInfoHash(magnet: string): string | null {
 const app = Fastify({ logger: false })
 
 // Fastify 5 only parses application/json by default.
-// We need to add parsers for binary uploads (.torrent files) and other types.
+// We need to add a parser for binary uploads (.torrent files).
 app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer' }, (_req, body, done) => {
-  done(null, body)
-})
-app.addContentTypeParser('*', { parseAs: 'buffer' }, (_req, body, done) => {
   done(null, body)
 })
 

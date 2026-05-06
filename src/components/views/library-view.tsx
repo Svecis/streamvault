@@ -31,11 +31,11 @@ export function LibraryView() {
       ])
       if (torrentsRes.ok) {
         const tData = await torrentsRes.json()
-        setTorrents(tData.torrents || [])
+        setTorrents(Array.isArray(tData.torrents) ? tData.torrents : [])
       }
       if (filesRes.ok) {
         const fData = await filesRes.json()
-        setFiles(fData.files || [])
+        setFiles(Array.isArray(fData.files) ? fData.files : [])
       }
     } catch (err) {
       console.error('Failed to fetch data:', err)
