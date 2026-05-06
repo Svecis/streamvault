@@ -5,6 +5,8 @@ import fs from 'fs'
 
 const PORT = parseInt(process.env.PORT || '3001', 10)
 const TORRENT_DIR = path.resolve(process.env.TORRENT_DIR || '../../torrents')
+const TORRENT_PORT_START = parseInt(process.env.TORRENT_PORT_START || '6881', 10)
+const TORRENT_PORT_END = parseInt(process.env.TORRENT_PORT_END || '6999', 10)
 
 // Ensure torrent directory exists
 if (!fs.existsSync(TORRENT_DIR)) {
@@ -14,18 +16,53 @@ if (!fs.existsSync(TORRENT_DIR)) {
 
 console.log(`Torrent dir: ${TORRENT_DIR}`)
 console.log(`Port: ${PORT}`)
+console.log(`Torrent listen ports: ${TORRENT_PORT_START}-${TORRENT_PORT_END}`)
+
+// Common public trackers to add to magnets that have few/no trackers
+const EXTRA_TRACKERS = [
+  'udp://tracker.opentrackr.org:1337/announce',
+  'udp://open.tracker.cl:1337/announce',
+  'udp://tracker.openbittorrent.com:6969/announce',
+  'udp://open.stealth.si:80/announce',
+  'udp://tracker.torrent.eu.org:451/announce',
+  'udp://exodus.desync.com:6969/announce',
+  'udp://tracker.tiny-vps.com:6969/announce',
+  'udp://tracker.moeking.me:6969/announce',
+  'udp://explodie.org:6969/announce',
+  'udp://tracker.pomf.se:80/announce',
+  'udp://tracker.dler.org:6969/announce',
+  'udp://p4p.arenabg.com:1337/announce',
+  'udp://movies.zsw.ca:6969/announce',
+  'udp://retracker.lanta-net.ru:2710/announce',
+]
 
 // Single global WebTorrent client
 const client = new WebTorrent({
-  maxConns: 55,
+  maxConns: 100,
   dht: true,
   tracker: true,
+  // Bind to specific port range for incoming connections
+  listenPort: TORRENT_PORT_START,
 })
 
-// Global error handler (don't accumulate listeners)
+// Global error handler
 client.on('error', (err: Error) => {
   console.error('WebTorrent client error:', err.message)
 })
+
+// Log DHT events
+const dht = client.dht
+if (dht) {
+  dht.on('listening', () => {
+    console.log('✓ DHT listening')
+  })
+  dht.on('ready', () => {
+    console.log('✓ DHT ready (bootstrap complete)')
+  })
+  dht.on('error', (err: Error) => {
+    console.error('DHT error:', err.message)
+  })
+}
 
 // Map of infoHash → torrent metadata
 const activeTorrents = new Map()
@@ -53,15 +90,54 @@ function getVideoFile(torrent: any) {
 
 // Extract infoHash from magnet URI (supports both hex and base32)
 function extractInfoHash(magnet: string): string | null {
-  // Try 40-char hex hash first
   const hexMatch = magnet.match(/btih:([a-fA-F0-9]{40})/i)
   if (hexMatch) return hexMatch[1].toLowerCase()
-
-  // Try 32-char base32 hash
   const b32Match = magnet.match(/btih:([A-Z2-7]{32})/i)
   if (b32Match) return b32Match[1].toLowerCase()
-
   return null
+}
+
+// Attach event listeners to a torrent for debugging
+function attachTorrentListeners(torrent: any, label: string) {
+  torrent.on('warning', (err: Error) => {
+    console.warn(`[${label}] Warning: ${err.message}`)
+  })
+  torrent.on('error', (err: Error) => {
+    console.error(`[${label}] Error: ${err.message}`)
+  })
+  torrent.on('done', () => {
+    console.log(`[${label}] Download complete!`)
+  })
+  torrent.on('noPeers', (announceType: string) => {
+    console.log(`[${label}] No peers from ${announceType}`)
+  })
+
+  // Log peer discovery events
+  let lastPeerLog = 0
+  torrent.on('wire', (wire: any) => {
+    const now = Date.now()
+    if (now - lastPeerLog > 5000) {
+      lastPeerLog = now
+      console.log(`[${label}] Peer connected: ${wire.peerId?.substring(0, 8) || 'unknown'} | Total: ${torrent.numPeers} peers | Progress: ${Math.round(torrent.progress * 100)}%`)
+    }
+  })
+
+  // Log progress every 30 seconds
+  const progressInterval = setInterval(() => {
+    if (torrent.destroyed) {
+      clearInterval(progressInterval)
+      return
+    }
+    console.log(`[${label}] Progress: ${Math.round(torrent.progress * 100)}% | Peers: ${torrent.numPeers} | Down: ${formatSpeed(torrent.downloadSpeed)} | Up: ${formatSpeed(torrent.uploadSpeed)}`)
+  }, 30000)
+}
+
+function formatSpeed(bps: number): string {
+  if (!bps) return '0 B/s'
+  const k = 1024
+  const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s']
+  const i = Math.floor(Math.log(bps) / Math.log(k))
+  return parseFloat((bps / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
 }
 
 const app = Fastify({ logger: false })
@@ -74,7 +150,13 @@ app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer' }, (_re
 
 // Health check
 app.get('/health', async () => {
-  return { status: 'ok', activeTorrents: activeTorrents.size, uptime: process.uptime() }
+  return {
+    status: 'ok',
+    activeTorrents: activeTorrents.size,
+    uptime: process.uptime(),
+    torrentPort: client.torrentPort || 'unknown',
+    dhtReady: dht ? (dht as any).ready : false,
+  }
 })
 
 // Add torrent by magnet URI
@@ -85,7 +167,7 @@ app.post('/torrent/add', async (request: any, reply: any) => {
     return reply.code(400).send({ error: 'Magnet URI is required' })
   }
 
-  console.log(`Adding magnet: ${magnet.substring(0, 80)}...`)
+  console.log(`Adding magnet: ${magnet.substring(0, 100)}...`)
 
   // Check if already active
   const existingHash = extractInfoHash(magnet)
@@ -95,12 +177,16 @@ app.post('/torrent/add', async (request: any, reply: any) => {
   }
 
   try {
+    // Add extra trackers to the magnet for better peer discovery
+    const trackerParams = EXTRA_TRACKERS.map(t => `&tr=${encodeURIComponent(t)}`).join('')
+    const magnetWithTrackers = magnet.includes('tr=') ? magnet : magnet + trackerParams
+
     const torrent = await new Promise<any>((resolve, reject) => {
       const timeout = setTimeout(() => {
-        reject(new Error('Torrent add timeout (60s) — no peers found or tracker unreachable'))
+        reject(new Error('Torrent add timeout (60s) — could not get metadata. The torrent may have 0 seeders.'))
       }, 60000)
 
-      client.add(magnet, { path: TORRENT_DIR }, (torrent: any) => {
+      client.add(magnetWithTrackers, { path: TORRENT_DIR }, (torrent: any) => {
         clearTimeout(timeout)
         console.log(`Torrent metadata received: ${torrent.name} (${torrent.infoHash})`)
         resolve(torrent)
@@ -109,6 +195,9 @@ app.post('/torrent/add', async (request: any, reply: any) => {
 
     const videoFile = getVideoFile(torrent)
     const infoHash = torrent.infoHash
+
+    // Attach debugging listeners
+    attachTorrentListeners(torrent, torrent.name.substring(0, 30))
 
     activeTorrents.set(infoHash, {
       torrent,
@@ -119,7 +208,7 @@ app.post('/torrent/add', async (request: any, reply: any) => {
       addedAt: Date.now(),
     })
 
-    console.log(`Torrent added: ${torrent.name} | Video: ${videoFile?.name || 'none'} | Peers: ${torrent.numPeers}`)
+    console.log(`Torrent added: ${torrent.name} | Video: ${videoFile?.name || 'none'} | Peers: ${torrent.numPeers} | Port: ${client.torrentPort}`)
 
     const files = torrent.files.map((f: any) => ({
       name: f.name,
@@ -152,7 +241,7 @@ app.post('/torrent/add-file', async (request: any, reply: any) => {
   try {
     const torrent = await new Promise<any>((resolve, reject) => {
       const timeout = setTimeout(() => {
-        reject(new Error('Torrent add timeout (60s) — no peers found or tracker unreachable'))
+        reject(new Error('Torrent add timeout (60s) — could not get metadata. The torrent may have 0 seeders.'))
       }, 60000)
 
       client.add(body as any, { path: TORRENT_DIR }, (torrent: any) => {
@@ -165,6 +254,21 @@ app.post('/torrent/add-file', async (request: any, reply: any) => {
     const videoFile = getVideoFile(torrent)
     const infoHash = torrent.infoHash
 
+    // Add extra trackers
+    EXTRA_TRACKERS.forEach(tracker => {
+      try {
+        if (!torrent.announce?.includes(tracker)) {
+          // @ts-ignore
+          torrent.addPeer?.()
+        }
+      } catch {
+        // ignore
+      }
+    })
+
+    // Attach debugging listeners
+    attachTorrentListeners(torrent, torrent.name.substring(0, 30))
+
     activeTorrents.set(infoHash, {
       torrent,
       videoFile,
@@ -174,7 +278,7 @@ app.post('/torrent/add-file', async (request: any, reply: any) => {
       addedAt: Date.now(),
     })
 
-    console.log(`Torrent added: ${torrent.name} | Video: ${videoFile?.name || 'none'} | Peers: ${torrent.numPeers}`)
+    console.log(`Torrent added: ${torrent.name} | Video: ${videoFile?.name || 'none'} | Peers: ${torrent.numPeers} | Port: ${client.torrentPort}`)
 
     const files = torrent.files.map((f: any) => ({
       name: f.name,
@@ -351,7 +455,8 @@ try {
   await app.listen({ port: PORT, host: '0.0.0.0' })
   console.log(`✓ Torrent service running on port ${PORT}`)
   console.log(`✓ Torrent dir: ${TORRENT_DIR}`)
-  console.log(`✓ WebTorrent client ready (DHT: enabled, Trackers: enabled)`)
+  console.log(`✓ WebTorrent client ready (DHT: enabled, Trackers: enabled, Port: ${client.torrentPort || 'pending'})`)
+  console.log(`✓ Extra trackers: ${EXTRA_TRACKERS.length} added`)
 } catch (err) {
   console.error('Failed to start torrent service:', err)
   process.exit(1)
