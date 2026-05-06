@@ -3,10 +3,11 @@
   "type": "module",
   "scripts": {
     "dev": "node --watch index.ts",
-    "start": "bun run index.ts"
+    "start": "node --import tsx index.ts"
   },
   "dependencies": {
     "webtorrent": "^2.8.5",
-    "fastify": "^5.8.5"
+    "fastify": "^5.8.5",
+    "tsx": "^4.19.0"
   }
 }

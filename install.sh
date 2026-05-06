@@ -97,6 +97,19 @@ else
   log "Bun installed."
 fi
 
+# ── 5b. Install Node.js ──────────────────────────────────────────────────────
+# Node.js is required for the torrent service (Bun can't load native .node addons
+# like node-datachannel which WebTorrent depends on for WebRTC)
+if command -v node &>/dev/null && [[ "$(node -v | cut -d. -f1)" == "v2"* ]]; then
+  log "Node.js already installed, skipping."
+else
+  log "Installing Node.js 22 LTS..."
+  apt-get install -y -qq curl > /dev/null 2>&1
+  curl -fsSL https://deb.nodesource.com/setup_22.x | bash - > /dev/null 2>&1
+  apt-get install -y -qq nodejs
+  log "Node.js $(node -v) installed."
+fi
+
 # ── 6. Clone / Update Repository ─────────────────────────────────────────────
 if [[ -d "${APP_DIR}/.git" ]]; then
   log "Repository exists, pulling latest changes..."
@@ -148,8 +161,9 @@ log ".env created with generated secrets."
 log "Installing Node.js dependencies..."
 su - ${APP_USER} -c "cd ${APP_DIR} && /home/${APP_USER}/.bun/bin/bun install --frozen-lockfile 2>/dev/null || /home/${APP_USER}/.bun/bin/bun install"
 
-log "Installing torrent service dependencies..."
-su - ${APP_USER} -c "cd ${APP_DIR}/mini-services/torrent-service && /home/${APP_USER}/.bun/bin/bun install"
+log "Installing torrent service dependencies (using npm for native addon support)..."
+cd ${APP_DIR}/mini-services/torrent-service && npm install --production 2>/dev/null
+chown -R ${APP_USER}:${APP_USER} "${APP_DIR}/mini-services/torrent-service"
 
 # ── 10. Database Setup ───────────────────────────────────────────────────────
 log "Setting up SQLite database..."
@@ -247,7 +261,7 @@ Type=simple
 User=${APP_USER}
 Group=${APP_USER}
 WorkingDirectory=${APP_DIR}/mini-services/torrent-service
-ExecStart=/home/${APP_USER}/.bun/bin/bun run index.ts
+ExecStart=/usr/bin/node --import tsx index.ts
 Restart=on-failure
 RestartSec=5
 StartLimitBurst=10
