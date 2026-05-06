@@ -1,5 +1,3 @@
-import path from 'path'
-
 /**
  * Torrent service URL — read from env or default to localhost.
  * In production on VPS, the torrent service runs as a separate

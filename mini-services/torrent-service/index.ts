@@ -74,6 +74,67 @@ if (dht) {
 // Map of infoHash → torrent metadata
 const activeTorrents = new Map()
 
+// SSE subscribers: infoHash → Set of reply.raw (writable streams)
+const sseClients = new Map<string, Set<any>>()
+
+// Per-torrent progress intervals
+const progressIntervals = new Map<string, NodeJS.Timeout>()
+
+// Broadcast progress data to all SSE subscribers for a given infoHash
+function broadcastProgress(infoHash: string, data: any) {
+  const clients = sseClients.get(infoHash)
+  if (!clients || clients.size === 0) return
+  const payload = `data: ${JSON.stringify(data)}\n\n`
+  for (const raw of clients) {
+    try {
+      raw.write(payload)
+    } catch {
+      // Client disconnected, remove from set
+      clients.delete(raw)
+    }
+  }
+}
+
+// Start a per-torrent progress interval that broadcasts every 2 seconds
+function startProgressBroadcast(infoHash: string, torrent: any) {
+  if (progressIntervals.has(infoHash)) return // already running
+
+  const progressInterval = setInterval(() => {
+    if (!activeTorrents.has(infoHash)) {
+      clearInterval(progressInterval)
+      progressIntervals.delete(infoHash)
+      return
+    }
+    const data = {
+      infoHash: torrent.infoHash,
+      progress: Math.round(torrent.progress * 10000) / 100,
+      downloadSpeed: torrent.downloadSpeed,
+      uploadSpeed: torrent.uploadSpeed,
+      peers: torrent.numPeers,
+      ratio: Math.round((torrent.ratio ?? 0) * 100) / 100,
+      timeRemaining: torrent.timeRemaining ?? null,
+      done: torrent.done ?? false,
+    }
+    broadcastProgress(infoHash, data)
+  }, 2000)
+
+  progressIntervals.set(infoHash, progressInterval)
+
+  torrent.on('destroy', () => {
+    clearInterval(progressInterval)
+    progressIntervals.delete(infoHash)
+    // Close all SSE clients for this torrent
+    const clients = sseClients.get(infoHash)
+    if (clients) {
+      for (const raw of clients) {
+        try { raw.end() } catch {}
+      }
+      clients.clear()
+      sseClients.delete(infoHash)
+    }
+  })
+}
+
 // MIME types for video files
 function getMimeType(filename: string): string {
   const ext = filename.split('.').pop()?.toLowerCase() || ''
@@ -223,6 +284,7 @@ async function restoreTorrents() {
           addedAt: Date.now(),
         })
 
+        startProgressBroadcast(infoHash, torrent)
         console.log(`✓ Restored: ${torrent.name} | Peers: ${torrent.numPeers}`)
       } catch (err: any) {
         console.error(`Failed to restore torrent ${row.name}: ${err.message}`)
@@ -287,6 +349,7 @@ app.post('/torrent/add', async (request: any, reply: any) => {
       addedAt: Date.now(),
     })
 
+    startProgressBroadcast(infoHash, torrent)
     console.log(`Torrent added: ${torrent.name} | Video: ${videoFile?.name || 'none'} | Peers: ${torrent.numPeers} | Port: ${client.torrentPort}`)
 
     const files = torrent.files.map((f: any) => ({
@@ -344,6 +407,7 @@ app.post('/torrent/add-file', async (request: any, reply: any) => {
       addedAt: Date.now(),
     })
 
+    startProgressBroadcast(infoHash, torrent)
     console.log(`Torrent added: ${torrent.name} | Video: ${videoFile?.name || 'none'} | Peers: ${torrent.numPeers} | Port: ${client.torrentPort}`)
 
     const files = torrent.files.map((f: any) => ({
@@ -558,7 +622,7 @@ app.get('/hls/:infoHash/status', (request: any, reply: any) => {
   return { active: true, status: job.status, segmentCount: job.segmentCount }
 })
 
-// SSE progress endpoint
+// SSE progress endpoint — subscribes to the per-torrent broadcast
 app.get('/progress/:infoHash', async (request: any, reply: any) => {
   const { infoHash } = request.params as { infoHash: string }
   const entry = activeTorrents.get(infoHash.toLowerCase())
@@ -571,29 +635,35 @@ app.get('/progress/:infoHash', async (request: any, reply: any) => {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
   })
+  reply.raw.write('\n') // initial flush to open the connection
 
-  const interval = setInterval(() => {
-    const t = entry.torrent
-    if (!t) {
-      clearInterval(interval)
-      return
-    }
+  // Register this client as an SSE subscriber
+  if (!sseClients.has(infoHash)) sseClients.set(infoHash, new Set())
+  sseClients.get(infoHash)!.add(reply.raw)
 
-    const data = JSON.stringify({
-      progress: t.progress,
-      downloadSpeed: t.downloadSpeed,
-      uploadSpeed: t.uploadSpeed,
-      peers: t.numPeers,
-      ratio: t.ratio,
-      timeRemaining: t.timeRemaining,
-    })
+  // Send immediate snapshot so client doesn't wait 2s for first data
+  const t = entry.torrent
+  const snapshot = JSON.stringify({
+    infoHash: t.infoHash,
+    progress: Math.round(t.progress * 10000) / 100,
+    downloadSpeed: t.downloadSpeed,
+    uploadSpeed: t.uploadSpeed,
+    peers: t.numPeers,
+    ratio: Math.round((t.ratio ?? 0) * 100) / 100,
+    timeRemaining: t.timeRemaining ?? null,
+    done: t.done ?? false,
+  })
+  reply.raw.write(`data: ${snapshot}\n\n`)
 
-    reply.raw.write(`data: ${data}\n\n`)
-  }, 2000)
-
+  // Unregister on disconnect
   request.raw.on('close', () => {
-    clearInterval(interval)
+    const clients = sseClients.get(infoHash)
+    if (clients) {
+      clients.delete(reply.raw)
+      if (clients.size === 0) sseClients.delete(infoHash)
+    }
   })
 })
 
@@ -649,10 +719,25 @@ app.delete('/torrent/:infoHash', async (request: any, reply: any) => {
     return reply.code(404).send({ error: 'Torrent not active' })
   }
 
+  const entry = activeTorrents.get(lowerHash)
+
+  // Destroy the torrent first — this triggers the 'destroy' event
+  // which clears the progress interval and closes SSE clients
+  if (entry?.torrent && !entry.torrent.destroyed) {
+    try { entry.torrent.destroy() } catch {}
+  }
+
   return new Promise((resolve) => {
     client.remove(lowerHash, () => {
       activeTorrents.delete(lowerHash)
       hlsCleanup(lowerHash)
+      // Clean up any remaining SSE state
+      sseClients.delete(lowerHash)
+      const pInterval = progressIntervals.get(lowerHash)
+      if (pInterval) {
+        clearInterval(pInterval)
+        progressIntervals.delete(lowerHash)
+      }
       console.log(`Torrent removed: ${lowerHash}`)
       resolve({ success: true })
     })
