@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSessionUser } from '@/lib/auth'
 import { TORRENT_SERVICE_URL, ensureTorrentService } from '@/lib/torrent-client'
 
+export const dynamic = 'force-dynamic'
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ infoHash: string }> }
@@ -16,8 +18,9 @@ export async function GET(
   try {
     await ensureTorrentService()
     const url = `${TORRENT_SERVICE_URL}/stream/${infoHash}`
-    const headers: Record<string, string> = {}
 
+    // Forward all request headers that matter for streaming
+    const headers: Record<string, string> = {}
     const range = request.headers.get('range')
     if (range) {
       headers['Range'] = range
@@ -32,18 +35,26 @@ export async function GET(
       )
     }
 
+    // Forward all response headers that matter for video streaming
     const responseHeaders = new Headers()
-    const contentType = res.headers.get('content-type')
-    const contentLength = res.headers.get('content-length')
-    const contentRange = res.headers.get('content-range')
-    const acceptRanges = res.headers.get('accept-ranges')
 
-    if (contentType) responseHeaders.set('Content-Type', contentType)
-    if (contentLength) responseHeaders.set('Content-Length', contentLength)
-    if (contentRange) responseHeaders.set('Content-Range', contentRange)
-    if (acceptRanges) responseHeaders.set('Accept-Ranges', acceptRanges)
+    // Copy streaming-critical headers from upstream
+    for (const key of [
+      'content-type',
+      'content-length',
+      'content-range',
+      'accept-ranges',
+      'transfer-encoding',
+    ]) {
+      const val = res.headers.get(key)
+      if (val) responseHeaders.set(key, val)
+    }
 
-    const status = contentRange ? 206 : 200
+    // Tell Caddy/NGINX to never buffer this response
+    responseHeaders.set('X-Accel-Buffering', 'no')
+    responseHeaders.set('Cache-Control', 'no-cache, no-transform')
+
+    const status = responseHeaders.has('Content-Range') ? 206 : 200
 
     return new Response(res.body, {
       status,

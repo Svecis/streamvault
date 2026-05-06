@@ -34,6 +34,7 @@ export async function GET(
     const responseHeaders = new Headers()
     responseHeaders.set('Content-Type', 'video/mp2t')
     responseHeaders.set('Cache-Control', 'no-cache')
+    responseHeaders.set('X-Accel-Buffering', 'no')
 
     return new Response(res.body, {
       status: 200,

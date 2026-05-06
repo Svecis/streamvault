@@ -92,6 +92,8 @@ export async function GET(
           'Content-Length': contentLength.toString(),
           'Content-Type': fileRecord.mimeType,
           'Accept-Ranges': 'bytes',
+          'X-Accel-Buffering': 'no',
+          'Cache-Control': 'no-cache, no-transform',
         },
       })
     }
@@ -120,6 +122,8 @@ export async function GET(
         'Content-Length': fileSize.toString(),
         'Content-Type': fileRecord.mimeType,
         'Accept-Ranges': 'bytes',
+        'X-Accel-Buffering': 'no',
+        'Cache-Control': 'no-cache, no-transform',
       },
     })
   } catch (error) {

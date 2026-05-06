@@ -40,6 +40,7 @@ export async function GET(
     const responseHeaders = new Headers()
     responseHeaders.set('Content-Type', 'application/vnd.apple.mpegurl')
     responseHeaders.set('Cache-Control', 'no-cache')
+    responseHeaders.set('X-Accel-Buffering', 'no')
 
     return new Response(playlist, {
       status: 200,

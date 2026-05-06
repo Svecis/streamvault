@@ -162,7 +162,7 @@ log "Installing Node.js dependencies..."
 su - ${APP_USER} -c "cd ${APP_DIR} && /home/${APP_USER}/.bun/bin/bun install --frozen-lockfile 2>/dev/null || /home/${APP_USER}/.bun/bin/bun install"
 
 log "Installing torrent service dependencies (using npm for native addon support)..."
-cd ${APP_DIR}/mini-services/torrent-service && npm install --production 2>/dev/null
+cd ${APP_DIR}/mini-services/torrent-service && npm install 2>/dev/null
 chown -R ${APP_USER}:${APP_USER} "${APP_DIR}/mini-services/torrent-service"
 
 # ── 10. Database Setup ───────────────────────────────────────────────────────
@@ -193,18 +193,40 @@ log "Configuring Caddy for ${DOMAIN}..."
 
 cat > /etc/caddy/Caddyfile << CADDY
 ${DOMAIN} {
-    reverse_proxy localhost:3000
+    # SSE, chunked video, HLS — must never be buffered
+    @streaming {
+        path /api/torrent/progress/* /api/torrent/stream/* /api/torrent/hls/* /api/torrent/hls-segment/* /api/file/*
+    }
+    handle @streaming {
+        reverse_proxy localhost:3000 {
+            flush_interval -1
+            header_up Host {host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+            header_up X-Real-IP {remote_host}
+        }
+    }
+
+    # Static assets caching
+    handle /_next/static/* {
+        reverse_proxy localhost:3000
+        header Cache-Control "public, max-age=31536000, immutable"
+    }
+
+    # Everything else
+    handle {
+        reverse_proxy localhost:3000 {
+            header_up Host {host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+            header_up X-Real-IP {remote_host}
+        }
+    }
 
     header {
         X-Content-Type-Options nosniff
         X-Frame-Options DENY
         Referrer-Policy strict-origin-when-cross-origin
-    }
-
-    # Static assets caching (handle preserves path, handle_path strips it)
-    handle /_next/static/* {
-        reverse_proxy localhost:3000
-        header Cache-Control "public, max-age=31536000, immutable"
     }
 }
 

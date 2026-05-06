@@ -26,3 +26,22 @@ Stage Summary:
 - webtorrent removed from root package.json (prevents build issues)
 - .env.example updated with proper placeholder values
 - No middleware.ts exists in the project, so no auth blocking issues
+
+---
+Task ID: 2
+Agent: Main Agent
+Task: Fix 4 real production streaming bugs (Caddyfile, tsx, Range headers, double buffering)
+
+Work Log:
+- Bug 1: Discovered install.sh writes a completely separate Caddyfile to /etc/caddy/Caddyfile — the repo root Caddyfile (port :81) is for sandbox only. The production Caddyfile had bare `reverse_proxy localhost:3000` with no flush_interval. Updated install.sh template to include @streaming matcher and flush_interval -1 for streaming paths.
+- Bug 2: install.sh line 165 used `npm install --production` which skips devDependencies. Changed to `npm install` (no --production flag) so tsx (needed at runtime for `node --import tsx`) is always installed. Note: tsx is in dependencies in the torrent service package.json, but the --production flag could still cause issues with sub-dependencies.
+- Bug 3: The stream proxy route already forwarded Range headers, but was missing: `force-dynamic` export, `Transfer-Encoding` header forwarding, `X-Accel-Buffering: no`, and `Cache-Control: no-cache, no-transform`. Added all of these.
+- Bug 4: Added X-Accel-Buffering: no and Cache-Control: no-cache, no-transform to ALL proxy routes: stream, HLS playlist, HLS segment, and file serve routes. This tells both Caddy and any upstream proxy to never buffer streaming responses.
+- Ran lint — all passes
+- Dev server still running fine
+
+Stage Summary:
+- install.sh now generates production Caddyfile with flush_interval -1 for streaming routes
+- install.sh no longer uses --production flag for npm install
+- All Next.js streaming proxy routes now have X-Accel-Buffering: no and force-dynamic
+- All streaming responses forward Transfer-Encoding and have no-cache headers
