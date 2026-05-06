@@ -22,7 +22,7 @@ export function LibraryView() {
   const [addError, setAddError] = useState('')
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
-  // Fetch torrents and files
+  // Fetch torrents (with live progress merged by server) and files
   const fetchData = useCallback(async () => {
     try {
       const [torrentsRes, filesRes] = await Promise.all([
@@ -44,47 +44,10 @@ export function LibraryView() {
 
   useEffect(() => {
     fetchData()
-    // Poll every 10 seconds for torrent progress
-    const interval = setInterval(fetchData, 10000)
+    // Poll every 3 seconds for live torrent progress
+    const interval = setInterval(fetchData, 3000)
     return () => clearInterval(interval)
   }, [fetchData])
-
-  // Fetch live torrent progress from the torrent service
-  useEffect(() => {
-    if (torrents.length === 0) return
-
-    const fetchProgress = async () => {
-      for (const t of torrents) {
-        try {
-          const res = await apiFetch(`/api/torrent/status/${t.infoHash}`)
-          if (res.ok) {
-            const data = await res.json()
-            if (data.active) {
-              setTorrents(prev =>
-                prev.map(pt =>
-                  pt.infoHash === t.infoHash
-                    ? {
-                        ...pt,
-                        progress: data.progress,
-                        downloadSpeed: data.downloadSpeed,
-                        peers: data.peers,
-                        ratio: data.ratio,
-                      }
-                    : pt
-                )
-              )
-            }
-          }
-        } catch {
-          // Ignore individual progress fetch errors
-        }
-      }
-    }
-
-    fetchProgress()
-    const interval = setInterval(fetchProgress, 5000)
-    return () => clearInterval(interval)
-  }, [torrents.length, setTorrents])
 
   const handleAddTorrent = async () => {
     if (!magnetLink.trim()) return
