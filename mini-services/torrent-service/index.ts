@@ -5,8 +5,9 @@ import fs from 'fs'
 
 const PORT = parseInt(process.env.PORT || '3001', 10)
 const TORRENT_DIR = path.resolve(process.env.TORRENT_DIR || '../../torrents')
-const TORRENT_PORT_START = parseInt(process.env.TORRENT_PORT_START || '6881', 10)
-const TORRENT_PORT_END = parseInt(process.env.TORRENT_PORT_END || '6999', 10)
+
+// WebTorrent listen port - must match UFW firewall rules
+const TORRENT_PORT = parseInt(process.env.TORRENT_PORT || '6881', 10)
 
 // Ensure torrent directory exists
 if (!fs.existsSync(TORRENT_DIR)) {
@@ -15,8 +16,8 @@ if (!fs.existsSync(TORRENT_DIR)) {
 }
 
 console.log(`Torrent dir: ${TORRENT_DIR}`)
-console.log(`Port: ${PORT}`)
-console.log(`Torrent listen ports: ${TORRENT_PORT_START}-${TORRENT_PORT_END}`)
+console.log(`API Port: ${PORT}`)
+console.log(`Torrent listen port: ${TORRENT_PORT}`)
 
 // Common public trackers to add to magnets that have few/no trackers
 const EXTRA_TRACKERS = [
@@ -36,13 +37,13 @@ const EXTRA_TRACKERS = [
   'udp://retracker.lanta-net.ru:2710/announce',
 ]
 
-// Single global WebTorrent client
+// Single global WebTorrent client - bind to specific port in UFW range
 const client = new WebTorrent({
   maxConns: 100,
   dht: true,
   tracker: true,
-  // Bind to specific port range for incoming connections
-  listenPort: TORRENT_PORT_START,
+  // Bind to port 6881 (in the UFW-allowed range 6881-6999)
+  listenPort: TORRENT_PORT,
 })
 
 // Global error handler
@@ -97,6 +98,14 @@ function extractInfoHash(magnet: string): string | null {
   return null
 }
 
+function formatSpeed(bps: number): string {
+  if (!bps) return '0 B/s'
+  const k = 1024
+  const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s']
+  const i = Math.floor(Math.log(bps) / Math.log(k))
+  return parseFloat((bps / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
+}
+
 // Attach event listeners to a torrent for debugging
 function attachTorrentListeners(torrent: any, label: string) {
   torrent.on('warning', (err: Error) => {
@@ -106,13 +115,13 @@ function attachTorrentListeners(torrent: any, label: string) {
     console.error(`[${label}] Error: ${err.message}`)
   })
   torrent.on('done', () => {
-    console.log(`[${label}] Download complete!`)
+    console.log(`[${label}] ✓ Download complete!`)
   })
   torrent.on('noPeers', (announceType: string) => {
     console.log(`[${label}] No peers from ${announceType}`)
   })
 
-  // Log peer discovery events
+  // Log peer discovery events (throttled)
   let lastPeerLog = 0
   torrent.on('wire', (wire: any) => {
     const now = Date.now()
@@ -132,12 +141,85 @@ function attachTorrentListeners(torrent: any, label: string) {
   }, 30000)
 }
 
-function formatSpeed(bps: number): string {
-  if (!bps) return '0 B/s'
-  const k = 1024
-  const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s']
-  const i = Math.floor(Math.log(bps) / Math.log(k))
-  return parseFloat((bps / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
+// Add a torrent (used for both new adds and restoration on startup)
+function addTorrentToClient(magnet: string): Promise<any> {
+  // Add extra trackers to the magnet for better peer discovery
+  const trackerParams = EXTRA_TRACKERS.map(t => `&tr=${encodeURIComponent(t)}`).join('')
+  const magnetWithTrackers = magnet.includes('tr=') ? magnet : magnet + trackerParams
+
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error('Torrent add timeout (60s) — could not get metadata. The torrent may have 0 seeders.'))
+    }, 60000)
+
+    client.add(magnetWithTrackers, { path: TORRENT_DIR }, (torrent: any) => {
+      clearTimeout(timeout)
+      console.log(`Torrent metadata received: ${torrent.name} (${torrent.infoHash})`)
+      resolve(torrent)
+    })
+  })
+}
+
+// Restore torrents from database on startup
+async function restoreTorrents() {
+  const DB_PATH = path.resolve(TORRENT_DIR, '../db/production.db')
+  if (!fs.existsSync(DB_PATH)) {
+    console.log('No database found, skipping torrent restoration')
+    return
+  }
+
+  try {
+    // Use better-sqlite3 or just read the file directly
+    // Since we can't import prisma here, we'll use a simple approach
+    const { execSync } = require('child_process')
+    let rows: any[] = []
+    try {
+      const output = execSync(`sqlite3 "${DB_PATH}" "SELECT infoHash, name, magnet FROM Torrent ORDER BY addedAt DESC;"`, { encoding: 'utf-8' })
+      rows = output.trim().split('\n').filter(Boolean).map(line => {
+        const parts = line.split('|')
+        return { infoHash: parts[0], name: parts[1], magnet: parts[2] }
+      })
+    } catch {
+      console.log('sqlite3 not available, trying alternative restoration method')
+      return
+    }
+
+    if (rows.length === 0) {
+      console.log('No torrents in database to restore')
+      return
+    }
+
+    console.log(`Restoring ${rows.length} torrent(s) from database...`)
+
+    for (const row of rows) {
+      if (!row.magnet) continue
+
+      try {
+        const torrent = await addTorrentToClient(row.magnet)
+        const videoFile = getVideoFile(torrent)
+        const infoHash = torrent.infoHash
+
+        attachTorrentListeners(torrent, torrent.name.substring(0, 30))
+
+        activeTorrents.set(infoHash, {
+          torrent,
+          videoFile,
+          name: torrent.name,
+          infoHash,
+          magnet: row.magnet,
+          addedAt: Date.now(),
+        })
+
+        console.log(`✓ Restored: ${torrent.name} | Peers: ${torrent.numPeers}`)
+      } catch (err: any) {
+        console.error(`Failed to restore torrent ${row.name}: ${err.message}`)
+      }
+    }
+
+    console.log(`✓ Restored ${activeTorrents.size} torrent(s)`)
+  } catch (err: any) {
+    console.error('Torrent restoration error:', err.message)
+  }
 }
 
 const app = Fastify({ logger: false })
@@ -177,26 +259,10 @@ app.post('/torrent/add', async (request: any, reply: any) => {
   }
 
   try {
-    // Add extra trackers to the magnet for better peer discovery
-    const trackerParams = EXTRA_TRACKERS.map(t => `&tr=${encodeURIComponent(t)}`).join('')
-    const magnetWithTrackers = magnet.includes('tr=') ? magnet : magnet + trackerParams
-
-    const torrent = await new Promise<any>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error('Torrent add timeout (60s) — could not get metadata. The torrent may have 0 seeders.'))
-      }, 60000)
-
-      client.add(magnetWithTrackers, { path: TORRENT_DIR }, (torrent: any) => {
-        clearTimeout(timeout)
-        console.log(`Torrent metadata received: ${torrent.name} (${torrent.infoHash})`)
-        resolve(torrent)
-      })
-    })
-
+    const torrent = await addTorrentToClient(magnet)
     const videoFile = getVideoFile(torrent)
     const infoHash = torrent.infoHash
 
-    // Attach debugging listeners
     attachTorrentListeners(torrent, torrent.name.substring(0, 30))
 
     activeTorrents.set(infoHash, {
@@ -254,19 +320,6 @@ app.post('/torrent/add-file', async (request: any, reply: any) => {
     const videoFile = getVideoFile(torrent)
     const infoHash = torrent.infoHash
 
-    // Add extra trackers
-    EXTRA_TRACKERS.forEach(tracker => {
-      try {
-        if (!torrent.announce?.includes(tracker)) {
-          // @ts-ignore
-          torrent.addPeer?.()
-        }
-      } catch {
-        // ignore
-      }
-    })
-
-    // Attach debugging listeners
     attachTorrentListeners(torrent, torrent.name.substring(0, 30))
 
     activeTorrents.set(infoHash, {
@@ -455,8 +508,13 @@ try {
   await app.listen({ port: PORT, host: '0.0.0.0' })
   console.log(`✓ Torrent service running on port ${PORT}`)
   console.log(`✓ Torrent dir: ${TORRENT_DIR}`)
-  console.log(`✓ WebTorrent client ready (DHT: enabled, Trackers: enabled, Port: ${client.torrentPort || 'pending'})`)
+  console.log(`✓ WebTorrent client ready (DHT: enabled, Trackers: enabled, Port: ${client.torrentPort || TORRENT_PORT})`)
   console.log(`✓ Extra trackers: ${EXTRA_TRACKERS.length} added`)
+
+  // Restore torrents from database after a short delay (let DHT bootstrap)
+  setTimeout(() => {
+    restoreTorrents()
+  }, 5000)
 } catch (err) {
   console.error('Failed to start torrent service:', err)
   process.exit(1)
