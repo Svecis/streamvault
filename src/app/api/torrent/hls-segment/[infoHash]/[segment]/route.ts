@@ -1,21 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getSessionUser } from '@/lib/auth'
 import { TORRENT_SERVICE_URL, ensureTorrentService } from '@/lib/torrent-client'
 
 export const dynamic = 'force-dynamic'
 
 /**
  * Proxy HLS .ts segment requests to torrent service.
+ * No auth check — hls.js makes XHR requests without session cookies.
  */
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ infoHash: string; segment: string }> }
 ) {
-  const user = await getSessionUser(request)
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
   const { infoHash, segment } = await params
 
   // Only allow .ts segment files

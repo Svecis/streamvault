@@ -1,23 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getSessionUser } from '@/lib/auth'
 import { TORRENT_SERVICE_URL, ensureTorrentService } from '@/lib/torrent-client'
 
 export const dynamic = 'force-dynamic'
 
 /**
  * Proxy HLS playlist request to torrent service.
- * Rewrites segment URLs in the m3u8 playlist to point through the Next.js proxy
- * so that the browser can access them (torrent service is not directly accessible).
+ * No auth check — hls.js makes XHR requests without session cookies.
+ * The infoHash itself acts as a unique/secret identifier.
  */
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ infoHash: string }> }
 ) {
-  const user = await getSessionUser(request)
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
   const { infoHash } = await params
 
   try {
@@ -38,8 +32,6 @@ export async function GET(
     let playlist = await res.text()
 
     // Replace relative segment URLs (seg00001.ts) with proxied URLs
-    // The torrent service generates URLs like: seg00001.ts
-    // We need them to be: /api/torrent/hls-segment/{infoHash}/seg00001.ts
     playlist = playlist.replace(
       /^(seg\d+\.ts)$/gm,
       `/api/torrent/hls-segment/${infoHash}/$1`
