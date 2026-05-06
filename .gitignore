@@ -52,3 +52,10 @@ prompt
 server.log
 # Skills directory
 /skills/
+# StreamVault specific
+uploads/
+db/*.db
+db/*.db-journal
+mini-services/torrent-service/node_modules/
+agent-ctx/
+worklog.md
