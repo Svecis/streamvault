@@ -187,25 +187,15 @@ ${DOMAIN} {
         Referrer-Policy strict-origin-when-cross-origin
     }
 
-    handle_path /_next/static/* {
+    # Static assets caching (handle preserves path, handle_path strips it)
+    handle /_next/static/* {
         reverse_proxy localhost:3000
         header Cache-Control "public, max-age=31536000, immutable"
-    }
-
-    request_body {
-        max_size 8GB
-    }
-
-    log {
-        output file /var/log/caddy/streamvault.log {
-            roll_size 50mb
-            roll_keep 5
-        }
     }
 }
 
 www.${DOMAIN} {
-    redir https://${DOMAIN}\{uri\} permanent
+    redir https://${DOMAIN}{uri} permanent
 }
 CADDY
 
