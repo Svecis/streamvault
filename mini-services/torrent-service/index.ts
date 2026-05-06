@@ -3,19 +3,28 @@ import WebTorrent from 'webtorrent'
 import path from 'path'
 import fs from 'fs'
 
-const PORT = 3001
+const PORT = parseInt(process.env.PORT || '3001', 10)
 const TORRENT_DIR = path.resolve(process.env.TORRENT_DIR || '../../torrents')
 
 // Ensure torrent directory exists
 if (!fs.existsSync(TORRENT_DIR)) {
   fs.mkdirSync(TORRENT_DIR, { recursive: true })
+  console.log(`Created torrent directory: ${TORRENT_DIR}`)
 }
+
+console.log(`Torrent dir: ${TORRENT_DIR}`)
+console.log(`Port: ${PORT}`)
 
 // Single global WebTorrent client
 const client = new WebTorrent({
   maxConns: 55,
   dht: true,
   tracker: true,
+})
+
+// Global error handler (don't accumulate listeners)
+client.on('error', (err: Error) => {
+  console.error('WebTorrent client error:', err.message)
 })
 
 // Map of infoHash → torrent metadata
@@ -42,11 +51,24 @@ function getVideoFile(torrent: any) {
     .sort((a: any, b: any) => b.length - a.length)[0] || null
 }
 
+// Extract infoHash from magnet URI (supports both hex and base32)
+function extractInfoHash(magnet: string): string | null {
+  // Try 40-char hex hash first
+  const hexMatch = magnet.match(/btih:([a-fA-F0-9]{40})/i)
+  if (hexMatch) return hexMatch[1].toLowerCase()
+
+  // Try 32-char base32 hash
+  const b32Match = magnet.match(/btih:([A-Z2-7]{32})/i)
+  if (b32Match) return b32Match[1].toLowerCase()
+
+  return null
+}
+
 const app = Fastify({ logger: false })
 
 // Health check
 app.get('/health', async () => {
-  return { status: 'ok', activeTorrents: activeTorrents.size }
+  return { status: 'ok', activeTorrents: activeTorrents.size, uptime: process.uptime() }
 })
 
 // Add torrent by magnet URI
@@ -57,29 +79,25 @@ app.post('/torrent/add', async (request: any, reply: any) => {
     return reply.code(400).send({ error: 'Magnet URI is required' })
   }
 
+  console.log(`Adding magnet: ${magnet.substring(0, 80)}...`)
+
   // Check if already active
-  const infoHashMatch = magnet.match(/btih:([a-fA-F0-9]{40})/)
-  if (infoHashMatch) {
-    const existingHash = infoHashMatch[1].toLowerCase()
-    if (activeTorrents.has(existingHash)) {
-      return { infoHash: existingHash, status: 'already_active' }
-    }
+  const existingHash = extractInfoHash(magnet)
+  if (existingHash && activeTorrents.has(existingHash)) {
+    console.log(`Torrent already active: ${existingHash}`)
+    return { infoHash: existingHash, status: 'already_active' }
   }
 
   try {
     const torrent = await new Promise<any>((resolve, reject) => {
       const timeout = setTimeout(() => {
-        reject(new Error('Torrent add timeout'))
+        reject(new Error('Torrent add timeout (60s) — no peers found or tracker unreachable'))
       }, 60000)
 
       client.add(magnet, { path: TORRENT_DIR }, (torrent: any) => {
         clearTimeout(timeout)
+        console.log(`Torrent metadata received: ${torrent.name} (${torrent.infoHash})`)
         resolve(torrent)
-      })
-
-      client.on('error', (err: Error) => {
-        clearTimeout(timeout)
-        reject(err)
       })
     })
 
@@ -95,7 +113,8 @@ app.post('/torrent/add', async (request: any, reply: any) => {
       addedAt: Date.now(),
     })
 
-    // Store file list
+    console.log(`Torrent added: ${torrent.name} | Video: ${videoFile?.name || 'none'} | Peers: ${torrent.numPeers}`)
+
     const files = torrent.files.map((f: any) => ({
       name: f.name,
       length: f.length,
@@ -109,6 +128,7 @@ app.post('/torrent/add', async (request: any, reply: any) => {
       status: 'added',
     }
   } catch (err: any) {
+    console.error(`Failed to add torrent: ${err.message}`)
     return reply.code(500).send({ error: err.message })
   }
 })
@@ -121,20 +141,18 @@ app.post('/torrent/add-file', async (request: any, reply: any) => {
     return reply.code(400).send({ error: 'Torrent file buffer required' })
   }
 
+  console.log(`Adding .torrent file (${body.length} bytes)`)
+
   try {
     const torrent = await new Promise<any>((resolve, reject) => {
       const timeout = setTimeout(() => {
-        reject(new Error('Torrent add timeout'))
+        reject(new Error('Torrent add timeout (60s) — no peers found or tracker unreachable'))
       }, 60000)
 
       client.add(body as any, { path: TORRENT_DIR }, (torrent: any) => {
         clearTimeout(timeout)
+        console.log(`Torrent metadata received: ${torrent.name} (${torrent.infoHash})`)
         resolve(torrent)
-      })
-
-      client.on('error', (err: Error) => {
-        clearTimeout(timeout)
-        reject(err)
       })
     })
 
@@ -150,6 +168,8 @@ app.post('/torrent/add-file', async (request: any, reply: any) => {
       addedAt: Date.now(),
     })
 
+    console.log(`Torrent added: ${torrent.name} | Video: ${videoFile?.name || 'none'} | Peers: ${torrent.numPeers}`)
+
     const files = torrent.files.map((f: any) => ({
       name: f.name,
       length: f.length,
@@ -163,6 +183,7 @@ app.post('/torrent/add-file', async (request: any, reply: any) => {
       status: 'added',
     }
   } catch (err: any) {
+    console.error(`Failed to add torrent file: ${err.message}`)
     return reply.code(500).send({ error: err.message })
   }
 })
@@ -313,6 +334,7 @@ app.delete('/torrent/:infoHash', async (request: any, reply: any) => {
   return new Promise((resolve) => {
     client.remove(lowerHash, () => {
       activeTorrents.delete(lowerHash)
+      console.log(`Torrent removed: ${lowerHash}`)
       resolve({ success: true })
     })
   })
@@ -321,7 +343,9 @@ app.delete('/torrent/:infoHash', async (request: any, reply: any) => {
 // Start server
 try {
   await app.listen({ port: PORT, host: '0.0.0.0' })
-  console.log(`Torrent service running on port ${PORT}`)
+  console.log(`✓ Torrent service running on port ${PORT}`)
+  console.log(`✓ Torrent dir: ${TORRENT_DIR}`)
+  console.log(`✓ WebTorrent client ready (DHT: enabled, Trackers: enabled)`)
 } catch (err) {
   console.error('Failed to start torrent service:', err)
   process.exit(1)
