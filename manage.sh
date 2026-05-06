@@ -8,6 +8,7 @@ set -euo pipefail
 APP_DIR="/opt/streamvault"
 APP_USER="streamvault"
 BUN="/home/${APP_USER}/.bun/bin/bun"
+DB_URL="file:${APP_DIR}/db/production.db"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -56,7 +57,7 @@ do_status() {
 
   # Show invite codes
   info "Active invite codes:"
-  su - ${APP_USER} -c "cd ${APP_DIR} && ${BUN} -e \"
+  su - ${APP_USER} -c "cd ${APP_DIR} && DATABASE_URL='${DB_URL}' ${BUN} -e \"
     const { PrismaClient } = require('@prisma/client');
     const db = new PrismaClient();
     db.inviteCode.findMany({ where: { used: false } }).then(codes => {
@@ -72,7 +73,9 @@ do_restart() {
   local target="${1:-all}"
   case "$target" in
     all)
-      systemctl restart streamvault streamvault-torrent
+      systemctl restart streamvault-torrent
+      sleep 2
+      systemctl restart streamvault
       ok "All services restarted"
       ;;
     app)
@@ -104,7 +107,7 @@ do_invite() {
   local CODE
   CODE=$(openssl rand -base64 8 | tr -d '/+=' | head -c 8)
 
-  su - ${APP_USER} -c "cd ${APP_DIR} && ${BUN} -e \"
+  su - ${APP_USER} -c "cd ${APP_DIR} && DATABASE_URL='${DB_URL}' ${BUN} -e \"
     const { PrismaClient } = require('@prisma/client');
     const db = new PrismaClient();
     db.inviteCode.create({ data: { code: '${CODE}' } }).then(() => {
@@ -117,24 +120,26 @@ do_invite() {
 do_update() {
   info "Pulling latest changes..."
   cd "${APP_DIR}"
-  su - ${APP_USER} -c "cd ${APP_DIR} && git pull origin main"
+  su - ${APP_USER} -c "cd ${APP_DIR} && git fetch origin && git reset --hard origin/main"
 
   info "Installing dependencies..."
   su - ${APP_USER} -c "cd ${APP_DIR} && ${BUN} install"
   su - ${APP_USER} -c "cd ${APP_DIR}/mini-services/torrent-service && ${BUN} install"
 
   info "Rebuilding..."
-  su - ${APP_USER} -c "cd ${APP_DIR} && ${BUN} run build"
+  su - ${APP_USER} -c "cd ${APP_DIR} && DATABASE_URL='${DB_URL}' ${BUN} run build"
 
   info "Restarting services..."
-  systemctl restart streamvault streamvault-torrent
+  systemctl restart streamvault-torrent
+  sleep 2
+  systemctl restart streamvault
 
   ok "Update complete!"
 }
 
 do_build() {
   info "Building Next.js..."
-  su - ${APP_USER} -c "cd ${APP_DIR} && ${BUN} run build"
+  su - ${APP_USER} -c "cd ${APP_DIR} && DATABASE_URL='${DB_URL}' ${BUN} run build"
   systemctl restart streamvault
   ok "Build complete and app restarted."
 }
@@ -149,7 +154,9 @@ do_db_reset() {
 
   systemctl stop streamvault
   rm -f "${APP_DIR}/db/production.db" "${APP_DIR}/db/production.db-journal"
-  su - ${APP_USER} -c "cd ${APP_DIR} && ${BUN} run db:push"
+  su - ${APP_USER} -c "cd ${APP_DIR} && DATABASE_URL='${DB_URL}' ${BUN} run db:push"
+  systemctl start streamvault-torrent
+  sleep 2
   systemctl start streamvault
   ok "Database reset."
   do_invite

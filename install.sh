@@ -19,8 +19,6 @@ APP_USER="streamvault"
 APP_DIR="/opt/streamvault"
 REPO_URL="https://github.com/Svecis/streamvault.git"
 DOMAIN="sveckys.top"
-NODE_MAJOR=20
-BUN_VERSION="latest"
 
 # Colors
 RED='\033[0;31m'
@@ -103,7 +101,8 @@ fi
 if [[ -d "${APP_DIR}/.git" ]]; then
   log "Repository exists, pulling latest changes..."
   cd "${APP_DIR}"
-  git pull origin main
+  git fetch origin
+  git reset --hard origin/main
 else
   log "Cloning StreamVault repository..."
   git clone "${REPO_URL}" "${APP_DIR}"
@@ -124,23 +123,25 @@ chown -R ${APP_USER}:${APP_USER} "${APP_DIR}/torrents"
 chown -R ${APP_USER}:${APP_USER} "${APP_DIR}/db"
 
 # ── 8. Environment Configuration ─────────────────────────────────────────────
-if [[ -f "${APP_DIR}/.env.production" ]]; then
-  log ".env.production already exists, keeping it."
-else
-  log "Creating .env.production..."
-  cat > "${APP_DIR}/.env.production" << ENV
+# Generate a random secret
+NEXTAUTH_SECRET=$(openssl rand -base64 32)
+
+# Always write the .env file that Prisma and Next.js will read
+log "Creating .env with production values..."
+cat > "${APP_DIR}/.env" << ENV
 # StreamVault Production Environment
 DATABASE_URL="file:${APP_DIR}/db/production.db"
-NEXTAUTH_SECRET="$(openssl rand -base64 32)"
+NEXTAUTH_SECRET="${NEXTAUTH_SECRET}"
 NEXTAUTH_URL="https://${DOMAIN}"
 NODE_ENV=production
 PORT=3000
+HOSTNAME=0.0.0.0
 TORRENT_DIR="${APP_DIR}/torrents"
 UPLOAD_DIR="${APP_DIR}/uploads"
+TORRENT_SERVICE_URL="http://127.0.0.1:3001"
 ENV
-  chown ${APP_USER}:${APP_USER} "${APP_DIR}/.env.production"
-  log ".env.production created with generated secrets."
-fi
+chown ${APP_USER}:${APP_USER} "${APP_DIR}/.env"
+log ".env created with generated secrets."
 
 # ── 9. Install Dependencies ──────────────────────────────────────────────────
 log "Installing Node.js dependencies..."
@@ -151,11 +152,12 @@ su - ${APP_USER} -c "cd ${APP_DIR}/mini-services/torrent-service && /home/${APP_
 
 # ── 10. Database Setup ───────────────────────────────────────────────────────
 log "Setting up SQLite database..."
-su - ${APP_USER} -c "cd ${APP_DIR} && /home/${APP_USER}/.bun/bin/bun run db:push"
+# Prisma reads DATABASE_URL from .env — which we just created with the correct path
+su - ${APP_USER} -c "cd ${APP_DIR} && DATABASE_URL='file:${APP_DIR}/db/production.db' /home/${APP_USER}/.bun/bin/bun run db:push"
 
 # ── 11. Build Next.js ───────────────────────────────────────────────────────
 log "Building Next.js application (this may take a minute)..."
-su - ${APP_USER} -c "cd ${APP_DIR} && /home/${APP_USER}/.bun/bin/bun run build"
+su - ${APP_USER} -c "cd ${APP_DIR} && DATABASE_URL='file:${APP_DIR}/db/production.db' /home/${APP_USER}/.bun/bin/bun run build"
 log "Build complete."
 
 # ── 12. Install Caddy ───────────────────────────────────────────────────────
@@ -216,7 +218,8 @@ log "Installing systemd services..."
 cat > /etc/systemd/system/streamvault.service << SVC
 [Unit]
 Description=StreamVault - Next.js Web App
-After=network.target
+After=network.target streamvault-torrent.service
+Wants=streamvault-torrent.service
 
 [Service]
 Type=simple
@@ -228,7 +231,7 @@ Restart=on-failure
 RestartSec=10
 StartLimitBurst=5
 StartLimitIntervalSec=60
-EnvironmentFile=${APP_DIR}/.env.production
+EnvironmentFile=${APP_DIR}/.env
 Environment=HOSTNAME=0.0.0.0
 Environment=PORT=3000
 LimitNOFILE=65536
@@ -255,8 +258,8 @@ Group=${APP_USER}
 WorkingDirectory=${APP_DIR}/mini-services/torrent-service
 ExecStart=/home/${APP_USER}/.bun/bin/bun run index.ts
 Restart=on-failure
-RestartSec=10
-StartLimitBurst=5
+RestartSec=5
+StartLimitBurst=10
 StartLimitIntervalSec=60
 Environment=PORT=3001
 Environment=TORRENT_DIR=${APP_DIR}/torrents
@@ -277,16 +280,35 @@ log "Systemd services installed."
 
 # ── 15. Start Everything ─────────────────────────────────────────────────────
 log "Starting StreamVault services..."
-systemctl enable streamvault streamvault-torrent caddy
+
+# Start torrent service first (Next.js depends on it)
+systemctl enable streamvault-torrent caddy
+systemctl restart streamvault-torrent
+log "Waiting for torrent service to be ready..."
+sleep 5
+
+# Verify torrent service is up
+for i in $(seq 1 10); do
+  if curl -sf http://127.0.0.1:3001/health > /dev/null 2>&1; then
+    log "Torrent service is ready!"
+    break
+  fi
+  if [[ $i -eq 10 ]]; then
+    warn "Torrent service not responding yet, continuing anyway..."
+  fi
+  sleep 2
+done
+
+# Start the Next.js app
+systemctl enable streamvault
 systemctl restart streamvault
 sleep 3
-systemctl restart streamvault-torrent
-sleep 2
+
+# Start Caddy
 systemctl restart caddy
 
 # ── 16. Verify ───────────────────────────────────────────────────────────────
 log "Verifying services..."
-
 sleep 3
 
 if systemctl is-active --quiet streamvault; then
@@ -309,28 +331,26 @@ fi
 
 # ── 17. Generate First Invite Code ───────────────────────────────────────────
 log "Generating first invite code..."
-sleep 2
 
 # Wait for the app to be ready
-for i in $(seq 1 10); do
-  if curl -sf http://localhost:3000/api/auth/session > /dev/null 2>&1; then
+for i in $(seq 1 15); do
+  if curl -sf http://localhost:3000 > /dev/null 2>&1; then
     break
   fi
   sleep 2
 done
 
-# Use the first user's session token to generate an invite code
-# First, create an admin invite code directly in the database
+# Create invite code directly in the database using Prisma
 INVITE_CODE=$(openssl rand -base64 8 | tr -d '/+=' | head -c 8)
 
-su - ${APP_USER} -c "cd ${APP_DIR} && /home/${APP_USER}/.bun/bin/bun -e \"
+su - ${APP_USER} -c "cd ${APP_DIR} && DATABASE_URL='file:${APP_DIR}/db/production.db' /home/${APP_USER}/.bun/bin/bun -e \"
 const { PrismaClient } = require('@prisma/client');
 const db = new PrismaClient();
 db.inviteCode.create({ data: { code: '${INVITE_CODE}' } }).then(() => {
   console.log('Invite code created');
   db.\\$disconnect();
 }).catch(e => { console.error(e); db.\\$disconnect(); });
-\"" 2>/dev/null || true
+\"" 2>/dev/null || warn "Could not auto-generate invite code (you can create one from the admin panel)"
 
 # ── 18. Summary ──────────────────────────────────────────────────────────────
 echo ""
@@ -346,14 +366,12 @@ echo -e "${CYAN}║${NC}  ${YELLOW}Important:${NC}                              
 echo -e "${CYAN}║${NC}  1. Point DNS for ${DOMAIN} to this server's IP     ${CYAN}║${NC}"
 echo -e "${CYAN}║${NC}  2. Caddy will auto-provision HTTPS via Let's Encrypt       ${CYAN}║${NC}"
 echo -e "${CYAN}║${NC}  3. Use invite code above to create your first account      ${CYAN}║${NC}"
-echo -e "${CYAN}║${NC}  4. First user is a regular user — promote to admin:       ${CYAN}║${NC}"
-echo -e "${CYAN}║${NC}     su - ${APP_USER} -c 'cd ${APP_DIR} && bun -e \"...\"'  ${CYAN}║${NC}"
 echo -e "${CYAN}║${NC}                                                            ${CYAN}║${NC}"
 echo -e "${CYAN}║${NC}  ${YELLOW}Useful commands:${NC}                                          ${CYAN}║${NC}"
-echo -e "${CYAN}║${NC}  systemctl status streamvault                               ${CYAN}║${NC}"
-echo -e "${CYAN}║${NC}  systemctl status streamvault-torrent                       ${CYAN}║${NC}"
-echo -e "${CYAN}║${NC}  journalctl -u streamvault -f                               ${CYAN}║${NC}"
-echo -e "${CYAN}║${NC}  systemctl restart streamvault                              ${CYAN}║${NC}"
+echo -e "${CYAN}║${NC}  sudo ${APP_DIR}/manage.sh status                           ${CYAN}║${NC}"
+echo -e "${CYAN}║${NC}  sudo ${APP_DIR}/manage.sh invite                           ${CYAN}║${NC}"
+echo -e "${CYAN}║${NC}  sudo ${APP_DIR}/manage.sh logs app                         ${CYAN}║${NC}"
+echo -e "${CYAN}║${NC}  sudo ${APP_DIR}/manage.sh update                           ${CYAN}║${NC}"
 echo -e "${CYAN}║${NC}                                                            ${CYAN}║${NC}"
 echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""

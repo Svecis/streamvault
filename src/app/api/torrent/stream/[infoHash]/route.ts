@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSessionUser } from '@/lib/auth'
-
-const TORRENT_SERVICE = 'http://127.0.0.1:3001'
+import { TORRENT_SERVICE_URL } from '@/lib/torrent-client'
 
 export async function GET(
   request: NextRequest,
@@ -15,7 +14,7 @@ export async function GET(
   const { infoHash } = await params
 
   try {
-    const url = `${TORRENT_SERVICE}/stream/${infoHash}`
+    const url = `${TORRENT_SERVICE_URL}/stream/${infoHash}`
     const headers: Record<string, string> = {}
 
     const range = request.headers.get('range')

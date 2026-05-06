@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getSessionUser } from '@/lib/auth'
-
-const TORRENT_SERVICE = 'http://127.0.0.1:3001'
+import { TORRENT_SERVICE_URL } from '@/lib/torrent-client'
 
 export async function POST(request: NextRequest) {
   const user = await getSessionUser(request)
@@ -24,7 +23,7 @@ export async function POST(request: NextRequest) {
       const buffer = Buffer.from(await torrentFile.arrayBuffer())
 
       // Forward to torrent service
-      const res = await fetch(`${TORRENT_SERVICE}/torrent/add-file`, {
+      const res = await fetch(`${TORRENT_SERVICE_URL}/torrent/add-file`, {
         method: 'POST',
         body: buffer,
         headers: { 'Content-Type': 'application/octet-stream' },
@@ -61,7 +60,7 @@ export async function POST(request: NextRequest) {
       }
 
       // Forward to torrent service
-      const res = await fetch(`${TORRENT_SERVICE}/torrent/add`, {
+      const res = await fetch(`${TORRENT_SERVICE_URL}/torrent/add`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ magnet }),

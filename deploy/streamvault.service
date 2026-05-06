@@ -1,36 +1,24 @@
 [Unit]
 Description=StreamVault - Next.js Web App
-After=network.target
+After=network.target streamvault-torrent.service
+Wants=streamvault-torrent.service
 
 [Service]
 Type=simple
 User=streamvault
 Group=streamvault
 WorkingDirectory=/opt/streamvault
-ExecStart=/home/streamvault/.bun/bin/bun .next/standalone/server.js
+ExecStart=/home/streamvault/.bun/bin/bun /opt/streamvault/.next/standalone/server.js
 Restart=on-failure
 RestartSec=10
 StartLimitBurst=5
 StartLimitIntervalSec=60
-
-# Environment
-EnvironmentFile=/opt/streamvault/.env.production
+EnvironmentFile=/opt/streamvault/.env
 Environment=HOSTNAME=0.0.0.0
 Environment=PORT=3000
-
-# Security hardening
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=/opt/streamvault/uploads /opt/streamvault/torrents /opt/streamvault/db /opt/streamvault/.next
-PrivateTmp=true
-
-# Resource limits (4-core, 8GB VPS)
 LimitNOFILE=65536
 MemoryMax=4G
 CPUQuota=200%
-
-# Logging
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=streamvault

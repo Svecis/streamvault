@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { TORRENT_SERVICE_URL as TORRENT_SVC } from '@/lib/torrent-client'
 
 function checkAdminAuth(request: NextRequest): boolean {
   const adminPassword = process.env.ADMIN_PASSWORD || 'admin123'
   const providedPassword = request.headers.get('x-admin-password')
   return providedPassword === adminPassword
 }
-
-const TORRENT_SERVICE_URL = 'http://127.0.0.1:3001'
 
 export async function DELETE(
   request: NextRequest,
@@ -37,7 +36,7 @@ export async function DELETE(
 
     // Call torrent service to remove active torrent
     try {
-      await fetch(`${TORRENT_SERVICE_URL}/torrent/${infoHash}`, {
+      await fetch(`${TORRENT_SVC}/torrent/${infoHash}`, {
         method: 'DELETE',
       })
     } catch {
