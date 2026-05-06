@@ -16,6 +16,47 @@ export function apiFetch(url: string, options: RequestInit = {}): Promise<Respon
 }
 
 /**
+ * Always returns a plain array. Never throws. Never returns null or undefined.
+ * Unwraps common envelope shapes like { torrents: [...] } or { files: [...] }.
+ */
+export async function fetchList(url: string, options: RequestInit = {}): Promise<any[]> {
+  try {
+    const res = await apiFetch(url, options)
+    if (!res.ok) {
+      console.warn(`fetchList ${url} → HTTP ${res.status}`)
+      return []
+    }
+    const data = await res.json()
+    if (Array.isArray(data)) return data
+    if (data === null || data === undefined) return []
+    if (typeof data !== 'object') return []
+    // Unwrap common envelope shapes
+    for (const key of ['items', 'results', 'data', 'torrents', 'files', 'users', 'invites', 'inviteCodes']) {
+      if (Array.isArray(data[key])) return data[key]
+    }
+    console.warn('fetchList: unexpected shape from', url, data)
+    return []
+  } catch (err) {
+    console.error('fetchList error:', url, err)
+    return []
+  }
+}
+
+/**
+ * Returns null on any error. Never throws.
+ * Use for single-object endpoints like /api/admin/stats.
+ */
+export async function fetchOne(url: string, options: RequestInit = {}): Promise<any | null> {
+  try {
+    const res = await apiFetch(url, options)
+    if (!res.ok) return null
+    return await res.json()
+  } catch {
+    return null
+  }
+}
+
+/**
  * Store session token after login (both cookie is set by server + localStorage)
  */
 export function storeSession(token: string) {

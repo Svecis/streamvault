@@ -12,7 +12,7 @@ import {
   FileVideo,
 } from 'lucide-react'
 import { useAppStore } from '@/store/app-store'
-import { apiFetch } from '@/lib/api'
+import { apiFetch, fetchList, fetchOne } from '@/lib/api'
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -126,32 +126,17 @@ export function AdminView() {
       try {
         const headers = { 'x-admin-password': pw }
 
-        const [statsRes, usersRes, torrentsRes, filesRes] = await Promise.all([
-          apiFetch('/api/admin/stats', { headers }),
-          apiFetch('/api/admin/users', { headers }),
-          apiFetch('/api/torrent/list', { headers }),
-          apiFetch('/api/files', { headers }),
+        const [statsJson, usersList, torrentsList, filesList] = await Promise.all([
+          fetchOne('/api/admin/stats', { headers }),
+          fetchList('/api/admin/users', { headers }),
+          fetchList('/api/torrent/list', { headers }),
+          fetchList('/api/files', { headers }),
         ])
 
-        if (!statsRes.ok || !usersRes.ok) {
-          throw new Error('Failed to fetch admin data')
-        }
-
-        const statsJson = await statsRes.json()
-        const usersJson = await usersRes.json()
-
-        setStats(statsJson)
-        setUsers(usersJson.users || [])
-
-        if (torrentsRes.ok) {
-          const tJson = await torrentsRes.json()
-          setTorrents(tJson.torrents || [])
-        }
-
-        if (filesRes.ok) {
-          const fJson = await filesRes.json()
-          setFiles(fJson.files || [])
-        }
+        setStats(statsJson ?? null)
+        setUsers(usersList)
+        setTorrents(torrentsList)
+        setFiles(filesList)
       } catch (err) {
         setDataError(err instanceof Error ? err.message : 'Failed to load data')
       } finally {

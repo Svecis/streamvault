@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { useAppStore, TorrentInfo, FileInfo } from '@/store/app-store'
-import { apiFetch } from '@/lib/api'
+import { apiFetch, fetchList } from '@/lib/api'
 import {
   Play, Trash2, Plus, FileVideo, Users, ArrowDownToLine,
   Loader2, X, Magnet
@@ -25,18 +25,12 @@ export function LibraryView() {
   // Fetch torrents (with live progress merged by server) and files
   const fetchData = useCallback(async () => {
     try {
-      const [torrentsRes, filesRes] = await Promise.all([
-        apiFetch('/api/torrent/list'),
-        apiFetch('/api/files')
+      const [tList, fList] = await Promise.all([
+        fetchList('/api/torrent/list'),
+        fetchList('/api/files'),
       ])
-      if (torrentsRes.ok) {
-        const tData = await torrentsRes.json()
-        setTorrents(Array.isArray(tData.torrents) ? tData.torrents : [])
-      }
-      if (filesRes.ok) {
-        const fData = await filesRes.json()
-        setFiles(Array.isArray(fData.files) ? fData.files : [])
-      }
+      setTorrents(tList)
+      setFiles(fList)
     } catch (err) {
       console.error('Failed to fetch data:', err)
     }

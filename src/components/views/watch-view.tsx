@@ -2,9 +2,9 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useAppStore } from '@/store/app-store'
-import { apiFetch } from '@/lib/api'
+import { apiFetch, fetchList, fetchOne } from '@/lib/api'
 import {
-  ArrowLeft, Share2, Upload, Users, ArrowDownToLine, Signal
+  ArrowLeft, Share2, Upload, Users, ArrowDownToLine, Signal, SwitchCamera
 } from 'lucide-react'
 
 interface TorrentStats {
@@ -25,6 +25,8 @@ export function WatchView() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const plyrScriptRef = useRef<HTMLScriptElement | null>(null)
   const plyrLinkRef = useRef<HTMLLinkElement | null>(null)
+  const hlsScriptRef = useRef<HTMLScriptElement | null>(null)
+  const hlsInstanceRef = useRef<any>(null)
 
   const [torrentStats, setTorrentStats] = useState<TorrentStats | null>(null)
   const [hasSubtitle, setHasSubtitle] = useState(false)
@@ -36,6 +38,9 @@ export function WatchView() {
     size: string
     addedAt: string
   } | null>(null)
+  const [usingHLS, setUsingHLS] = useState(false)
+  const [showHLSButton, setShowHLSButton] = useState(false)
+  const [hlsLoading, setHlsLoading] = useState(false)
 
   const videoSrc = watchParams
     ? watchParams.type === 'torrent'
@@ -67,43 +72,38 @@ export function WatchView() {
     })
   }
 
-  // Fetch video info
+  // Fetch video info using safe fetchList
   useEffect(() => {
     if (!watchParams) return
 
     const fetchInfo = async () => {
       try {
         if (watchParams.type === 'torrent') {
-          const res = await apiFetch('/api/torrent/list')
-          if (res.ok) {
-            const data = await res.json()
-            const torrent = (data.torrents || []).find(
-              (t: any) => t.infoHash === watchParams.id
-            )
-            if (torrent) {
-              setVideoInfo({
-                name: torrent.name,
-                size: formatSize(torrent.size),
-                addedAt: formatDate(torrent.addedAt),
-              })
+          const torrents = await fetchList('/api/torrent/list')
+          const torrent = torrents.find((t: any) => t.infoHash === watchParams.id)
+          if (torrent) {
+            setVideoInfo({
+              name: torrent.name,
+              size: formatSize(torrent.size),
+              addedAt: formatDate(torrent.addedAt),
+            })
+            // Check if this is a non-native format that could benefit from HLS
+            const isMkv = /\.(mkv|avi|mov|m4v|flv)$/i.test(torrent.name)
+            if (isMkv) {
+              setShowHLSButton(true)
             }
           }
         } else {
-          const res = await apiFetch('/api/files')
-          if (res.ok) {
-            const data = await res.json()
-            const file = (data.files || []).find(
-              (f: any) => f.id === watchParams.id
-            )
-            if (file) {
-              setVideoInfo({
-                name: file.originalName,
-                size: formatSize(file.size),
-                addedAt: formatDate(file.addedAt),
-              })
-              if (file.hasSubtitle) {
-                setHasSubtitle(true)
-              }
+          const files = await fetchList('/api/files')
+          const file = files.find((f: any) => f.id === watchParams.id)
+          if (file) {
+            setVideoInfo({
+              name: file.originalName,
+              size: formatSize(file.size),
+              addedAt: formatDate(file.addedAt),
+            })
+            if (file.hasSubtitle) {
+              setHasSubtitle(true)
             }
           }
         }
@@ -176,6 +176,12 @@ export function WatchView() {
     document.head.appendChild(script)
     plyrScriptRef.current = script
 
+    // Load HLS.js for future use
+    const hlsScript = document.createElement('script')
+    hlsScript.src = 'https://cdn.jsdelivr.net/npm/hls.js@latest/dist/hls.min.js'
+    document.head.appendChild(hlsScript)
+    hlsScriptRef.current = hlsScript
+
     return () => {
       if (playerRef.current) {
         try {
@@ -185,13 +191,65 @@ export function WatchView() {
         }
         playerRef.current = null
       }
+      if (hlsInstanceRef.current) {
+        try {
+          hlsInstanceRef.current.destroy()
+        } catch {
+          // Ignore
+        }
+        hlsInstanceRef.current = null
+      }
       if (plyrScriptRef.current && plyrScriptRef.current.parentNode) {
         plyrScriptRef.current.parentNode.removeChild(plyrScriptRef.current)
       }
       if (plyrLinkRef.current && plyrLinkRef.current.parentNode) {
         plyrLinkRef.current.parentNode.removeChild(plyrLinkRef.current)
       }
+      if (hlsScriptRef.current && hlsScriptRef.current.parentNode) {
+        hlsScriptRef.current.parentNode.removeChild(hlsScriptRef.current)
+      }
     }
+  }, [watchParams])
+
+  // Switch to HLS mode for MKV/AVI seeking support
+  const switchToHLS = useCallback(async () => {
+    if (!watchParams || !videoRef.current) return
+    setHlsLoading(true)
+
+    const video = videoRef.current
+    const hlsUrl = `/api/torrent/hls/${watchParams.id}/stream.m3u8`
+
+    // @ts-ignore
+    if (window.Hls && window.Hls.isSupported()) {
+      // @ts-ignore
+      const hls = new window.Hls()
+      hlsInstanceRef.current = hls
+      hls.loadSource(hlsUrl)
+      hls.attachMedia(video)
+      hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
+        video.play()
+        setUsingHLS(true)
+        setHlsLoading(false)
+      })
+      hls.on(window.Hls.Events.ERROR, (_event: any, data: any) => {
+        console.error('HLS error:', data)
+        if (data.fatal) {
+          setError('HLS playback failed. Try refreshing the page.')
+          setHlsLoading(false)
+        }
+      })
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      // Safari supports HLS natively
+      video.src = hlsUrl
+      video.play()
+      setUsingHLS(true)
+      setHlsLoading(false)
+    } else {
+      setError('HLS is not supported in this browser.')
+      setHlsLoading(false)
+    }
+
+    setShowHLSButton(false)
   }, [watchParams])
 
   // Handle video error
@@ -252,9 +310,8 @@ export function WatchView() {
 
       const poll = async () => {
         try {
-          const res = await apiFetch(`/api/torrent/status/${infoHash}`)
-          if (res.ok) {
-            const data = await res.json()
+          const data = await fetchOne(`/api/torrent/status/${infoHash}`)
+          if (data) {
             setTorrentStats({
               progress: data.progress ?? 0,
               downloadSpeed: data.downloadSpeed ?? 0,
@@ -378,7 +435,7 @@ export function WatchView() {
           className="w-full"
           style={{ maxHeight: '70vh' }}
         >
-          <source src={videoSrc} />
+          {!usingHLS && <source src={videoSrc} />}
           {hasSubtitle && (
             <track
               ref={trackRef}
@@ -406,6 +463,29 @@ export function WatchView() {
           </div>
         )}
       </div>
+
+      {/* HLS toggle for non-native formats */}
+      {showHLSButton && (
+        <div className="mb-4 flex items-center gap-3">
+          <button
+            onClick={switchToHLS}
+            disabled={hlsLoading}
+            className="flex items-center gap-1.5 px-3 py-2 border border-[#e8552a]/40 text-[#e8552a] text-sm rounded hover:bg-[#e8552a]/10 transition-colors duration-200 disabled:opacity-50"
+          >
+            <SwitchCamera className="w-4 h-4" />
+            {hlsLoading ? 'Starting HLS...' : 'Switch to HLS (enable seeking)'}
+          </button>
+          <span className="text-xs text-[#666]">
+            Seeking is limited while downloading MKV/AVI. Click to switch to HLS for full seeking.
+          </span>
+        </div>
+      )}
+      {usingHLS && (
+        <div className="mb-4 flex items-center gap-2 text-xs text-[#22c55e]">
+          <SwitchCamera className="w-3.5 h-3.5" />
+          HLS mode active — full seeking enabled
+        </div>
+      )}
 
       {/* Info Section */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

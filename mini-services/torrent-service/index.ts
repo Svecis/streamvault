@@ -3,6 +3,11 @@ import WebTorrent from 'webtorrent'
 import path from 'path'
 import fs from 'fs'
 import { execSync } from 'child_process'
+import ffmpeg from 'fluent-ffmpeg'
+
+// ESM polyfill for require — some dependencies may still use CommonJS require()
+import { createRequire } from 'module'
+const require = createRequire(import.meta.url)
 
 const PORT = parseInt(process.env.PORT || '3001', 10)
 const TORRENT_DIR = path.resolve(process.env.TORRENT_DIR || '../../torrents')
@@ -359,7 +364,58 @@ app.post('/torrent/add-file', async (request: any, reply: any) => {
   }
 })
 
-// Stream video file from torrent
+// ── HLS Job Manager ──────────────────────────────────────
+const hlsJobs = new Map<string, { status: string; segmentCount: number }>()
+
+function startHLS(infoHash: string, inputStream: any, outDir: string) {
+  if (hlsJobs.get(infoHash)?.status === 'running') return
+  fs.mkdirSync(outDir, { recursive: true })
+  hlsJobs.set(infoHash, { status: 'running', segmentCount: 0 })
+
+  ffmpeg(inputStream)
+    .inputOptions(['-probesize', '50M', '-analyzeduration', '20M'])
+    .outputOptions([
+      '-c:v', 'copy',
+      '-c:a', 'aac', '-b:a', '192k', '-ac', '2',
+      '-f', 'hls',
+      '-hls_time', '4',
+      '-hls_list_size', '0',
+      '-hls_flags', 'independent_segments+append_list',
+      '-hls_segment_type', 'mpegts',
+      '-hls_segment_filename', path.join(outDir, 'seg%05d.ts'),
+    ])
+    .output(path.join(outDir, 'stream.m3u8'))
+    .on('progress', (info: any) => {
+      const secs = info.timemark?.split(':').reduce((a: number, t: string) => 60 * a + +t, 0) ?? 0
+      const job = hlsJobs.get(infoHash)
+      if (job) job.segmentCount = Math.floor(secs / 4)
+    })
+    .on('end', () => hlsJobs.set(infoHash, { status: 'done', segmentCount: 9999 }))
+    .on('error', (err: Error) => {
+      console.error('[HLS]', err.message)
+      hlsJobs.set(infoHash, { status: 'error', segmentCount: 0 })
+    })
+    .run()
+}
+
+function isHLSReady(infoHash: string): boolean {
+  const job = hlsJobs.get(infoHash)
+  return !!job && (job.status === 'done' || (job.status === 'running' && job.segmentCount >= 2))
+}
+
+function hlsCleanup(infoHash: string) {
+  const hlsDir = path.join(TORRENT_DIR, infoHash)
+  if (fs.existsSync(hlsDir)) {
+    fs.rmSync(hlsDir, { recursive: true, force: true })
+  }
+  hlsJobs.delete(infoHash)
+}
+
+// ── Stream video file from torrent ───────────────────────
+
+// Native browser-playable formats (can be streamed raw with Range support)
+const NATIVE_FORMATS = ['mp4', 'webm']
+
 app.get('/stream/:infoHash', async (request: any, reply: any) => {
   const { infoHash } = request.params as { infoHash: string }
   const entry = activeTorrents.get(infoHash.toLowerCase())
@@ -373,6 +429,18 @@ app.get('/stream/:infoHash', async (request: any, reply: any) => {
     return reply.code(404).send({ error: 'No video file in torrent' })
   }
 
+  const ext = path.extname(file.name).slice(1).toLowerCase()
+
+  // Native formats: stream raw with Range support
+  if (NATIVE_FORMATS.includes(ext)) {
+    return streamRaw(file, request, reply)
+  }
+
+  // Non-native formats (MKV, AVI, MOV, M4V, FLV): FFmpeg remux to fMP4
+  return streamTranscoded(file, reply)
+})
+
+function streamRaw(file: any, request: any, reply: any) {
   const fileLength = file.length
   const range = request.headers.range
 
@@ -383,7 +451,7 @@ app.get('/stream/:infoHash', async (request: any, reply: any) => {
   if (range) {
     const parts = range.replace(/bytes=/, '').split('-')
     const start = parseInt(parts[0], 10)
-    const end = parts[1] ? parseInt(parts[1], 10) : Math.min(start + 1024 * 1024, fileLength - 1)
+    const end = parts[1] ? parseInt(parts[1], 10) : Math.min(start + 4 * 1024 * 1024, fileLength - 1)
 
     if (start >= fileLength || end >= fileLength) {
       reply.code(416).headers({
@@ -396,19 +464,98 @@ app.get('/stream/:infoHash', async (request: any, reply: any) => {
       'Content-Range': `bytes ${start}-${end}/${fileLength}`,
       'Accept-Ranges': 'bytes',
       'Content-Length': end - start + 1,
-      'Content-Type': getMimeType(file.name),
+      'Content-Type': 'video/mp4',
     })
 
     file.createReadStream({ start, end }).pipe(reply.raw)
   } else {
     reply.headers({
       'Content-Length': fileLength,
-      'Content-Type': getMimeType(file.name),
+      'Content-Type': 'video/mp4',
       'Accept-Ranges': 'bytes',
     })
 
     file.createReadStream().pipe(reply.raw)
   }
+}
+
+function streamTranscoded(file: any, reply: any) {
+  const inputStream = file.createReadStream()
+
+  reply.headers({
+    'Content-Type': 'video/mp4',
+    'Transfer-Encoding': 'chunked',
+    'Cache-Control': 'no-cache',
+  })
+
+  const ff = ffmpeg(inputStream)
+    .inputOptions(['-probesize', '50M', '-analyzeduration', '20M'])
+    .outputOptions([
+      '-c:v', 'copy',           // copy video — NO re-encode (fast, no CPU cost)
+      '-c:a', 'aac',            // transcode audio to AAC (browser-compatible)
+      '-b:a', '192k',
+      '-ac', '2',               // downmix 5.1/7.1 to stereo
+      '-movflags', 'frag_keyframe+empty_moov+faststart+default_base_moof',
+      '-f', 'mp4',
+    ])
+    .on('error', (err: Error) => {
+      console.error('[FFmpeg stream]', err.message)
+      if (!reply.sent) reply.raw.destroy()
+    })
+
+  ff.pipe(reply.raw, { end: true })
+  reply.raw.on('close', () => { try { ff.kill('SIGKILL') } catch {} })
+}
+
+// ── HLS endpoints ────────────────────────────────────────
+
+// Start HLS transcoding and serve the playlist
+app.get('/hls/:infoHash/stream.m3u8', async (request: any, reply: any) => {
+  const { infoHash } = request.params as { infoHash: string }
+  const entry = activeTorrents.get(infoHash.toLowerCase())
+
+  if (!entry || !entry.videoFile) {
+    return reply.code(404).send({ error: 'No video file' })
+  }
+
+  if (!hlsJobs.has(infoHash)) {
+    startHLS(infoHash, entry.videoFile.createReadStream(), path.join(TORRENT_DIR, infoHash))
+  }
+
+  // Wait up to 12 seconds for first 2 segments
+  let waited = 0
+  while (!isHLSReady(infoHash) && waited < 12000) {
+    await new Promise(r => setTimeout(r, 500))
+    waited += 500
+  }
+
+  const playlistPath = path.join(TORRENT_DIR, infoHash, 'stream.m3u8')
+  if (!fs.existsSync(playlistPath)) {
+    return reply.code(503).send({ error: 'HLS not ready yet, retry in a few seconds' })
+  }
+
+  reply.headers({ 'Content-Type': 'application/vnd.apple.mpegurl', 'Cache-Control': 'no-cache' })
+  reply.send(fs.createReadStream(playlistPath))
+})
+
+// Serve individual .ts segments
+app.get('/hls/:infoHash/:segment', (request: any, reply: any) => {
+  const { infoHash, segment } = request.params as { infoHash: string; segment: string }
+  if (!segment.endsWith('.ts')) return reply.code(400).send()
+
+  const segPath = path.join(TORRENT_DIR, infoHash, segment)
+  if (!fs.existsSync(segPath)) return reply.code(404).send()
+
+  reply.headers({ 'Content-Type': 'video/mp2t' })
+  reply.send(fs.createReadStream(segPath))
+})
+
+// HLS status endpoint
+app.get('/hls/:infoHash/status', (request: any, reply: any) => {
+  const { infoHash } = request.params as { infoHash: string }
+  const job = hlsJobs.get(infoHash)
+  if (!job) return { active: false }
+  return { active: true, status: job.status, segmentCount: job.segmentCount }
 })
 
 // SSE progress endpoint
@@ -505,6 +652,7 @@ app.delete('/torrent/:infoHash', async (request: any, reply: any) => {
   return new Promise((resolve) => {
     client.remove(lowerHash, () => {
       activeTorrents.delete(lowerHash)
+      hlsCleanup(lowerHash)
       console.log(`Torrent removed: ${lowerHash}`)
       resolve({ success: true })
     })
