@@ -92,6 +92,9 @@ export async function POST(request: NextRequest) {
     }
   } catch (err: any) {
     console.error('Torrent add error:', err)
-    return NextResponse.json({ error: err.message }, { status: 500 })
+    const msg = err.cause?.code === 'ECONNREFUSED'
+      ? 'Torrent service is not running. Please restart it or contact the admin.'
+      : err.message || 'Failed to add torrent'
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 }

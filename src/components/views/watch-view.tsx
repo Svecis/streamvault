@@ -39,7 +39,7 @@ export function WatchView() {
 
   const videoSrc = watchParams
     ? watchParams.type === 'torrent'
-      ? `/api/torrent/stream/${watchParams.id}?XTransformPort=3001`
+      ? `/api/torrent/stream/${watchParams.id}`
       : `/api/file/${watchParams.id}`
     : ''
 
