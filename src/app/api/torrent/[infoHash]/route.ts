@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getSessionUser } from '@/lib/auth'
-import { TORRENT_SERVICE_URL } from '@/lib/torrent-client'
+import { TORRENT_SERVICE_URL, ensureTorrentService } from '@/lib/torrent-client'
 
 export async function DELETE(
   request: NextRequest,
@@ -16,7 +16,8 @@ export async function DELETE(
 
   try {
     // Remove from torrent service
-    await fetch(`${TORRENT_SERVICE_URL}/torrent/${infoHash}`, { method: 'DELETE' })
+    await ensureTorrentService()
+    await fetch(`${TORRENT_SERVICE_URL}/torrent/${infoHash}`, { method: 'DELETE', cache: 'no-store' })
 
     // Remove from database
     await db.torrent.deleteMany({ where: { infoHash } })

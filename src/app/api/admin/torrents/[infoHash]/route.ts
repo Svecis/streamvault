@@ -38,6 +38,7 @@ export async function DELETE(
     try {
       await fetch(`${TORRENT_SVC}/torrent/${infoHash}`, {
         method: 'DELETE',
+        cache: 'no-store',
       })
     } catch {
       // Torrent service may not be running or torrent not active

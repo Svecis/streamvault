@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getSessionUser } from '@/lib/auth'
-import { TORRENT_SERVICE_URL } from '@/lib/torrent-client'
+import { TORRENT_SERVICE_URL, ensureTorrentService } from '@/lib/torrent-client'
+
+export const dynamic = 'force-dynamic'
 
 export async function GET(request: NextRequest) {
   const user = await getSessionUser(request)
@@ -15,11 +17,13 @@ export async function GET(request: NextRequest) {
       include: { user: { select: { label: true } } },
     })
 
-    // Merge live progress from torrent service
+    // Ensure torrent service is running, then merge live progress
     let liveData: any[] = []
     try {
+      await ensureTorrentService()
       const liveRes = await fetch(`${TORRENT_SERVICE_URL}/torrent/active`, {
         signal: AbortSignal.timeout(3000),
+        cache: 'no-store',
       })
       if (liveRes.ok) {
         liveData = await liveRes.json()

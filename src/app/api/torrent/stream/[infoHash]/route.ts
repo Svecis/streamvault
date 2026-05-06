@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSessionUser } from '@/lib/auth'
-import { TORRENT_SERVICE_URL } from '@/lib/torrent-client'
+import { TORRENT_SERVICE_URL, ensureTorrentService } from '@/lib/torrent-client'
 
 export async function GET(
   request: NextRequest,
@@ -14,6 +14,7 @@ export async function GET(
   const { infoHash } = await params
 
   try {
+    await ensureTorrentService()
     const url = `${TORRENT_SERVICE_URL}/stream/${infoHash}`
     const headers: Record<string, string> = {}
 
@@ -22,7 +23,7 @@ export async function GET(
       headers['Range'] = range
     }
 
-    const res = await fetch(url, { headers })
+    const res = await fetch(url, { headers, cache: 'no-store' })
 
     if (!res.ok) {
       return NextResponse.json(

@@ -1,6 +1,8 @@
 import { NextRequest } from 'next/server'
 import { getSessionUser } from '@/lib/auth'
-import { TORRENT_SERVICE_URL } from '@/lib/torrent-client'
+import { TORRENT_SERVICE_URL, ensureTorrentService } from '@/lib/torrent-client'
+
+export const dynamic = 'force-dynamic'
 
 export async function GET(
   request: NextRequest,
@@ -16,31 +18,51 @@ export async function GET(
 
   const { infoHash } = await params
 
-  try {
-    const url = `${TORRENT_SERVICE_URL}/progress/${infoHash}`
+  // Instead of proxying the SSE stream (which Next.js buffers),
+  // we poll the torrent service directly and emit our own SSE events.
+  const encoder = new TextEncoder()
 
-    // Forward SSE stream from torrent service
-    const res = await fetch(url)
+  // Ensure torrent service is running before starting SSE
+  await ensureTorrentService()
 
-    if (!res.ok) {
-      return new Response(JSON.stringify({ error: 'Torrent not active' }), {
-        status: res.status,
-        headers: { 'Content-Type': 'application/json' },
+  const stream = new ReadableStream({
+    async start(controller) {
+      const interval = setInterval(async () => {
+        try {
+          const res = await fetch(
+            `${TORRENT_SERVICE_URL}/torrent/status/${infoHash}`,
+            { cache: 'no-store' }
+          )
+          if (res.ok) {
+            const data = await res.json()
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify(data)}\n\n`)
+            )
+          } else {
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify({ active: false })}\n\n`)
+            )
+          }
+        } catch {
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ active: false })}\n\n`)
+          )
+        }
+      }, 2000)
+
+      // Cleanup when client disconnects
+      request.signal.addEventListener('abort', () => {
+        clearInterval(interval)
+        controller.close()
       })
-    }
+    },
+  })
 
-    // Return as SSE
-    return new Response(res.body, {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        Connection: 'keep-alive',
-      },
-    })
-  } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    })
-  }
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+    },
+  })
 }

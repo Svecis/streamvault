@@ -184,3 +184,28 @@ Stage Summary:
 - 5 fully functional views with dark minimalist design
 - Torrent mini-service running on port 3001
 - All lint checks pass
+
+---
+Task ID: 18
+Agent: Main
+Task: Fix torrent stats not updating - stale data in UI despite active downloading
+
+Work Log:
+- Diagnosed root cause: Next.js App Router caches `fetch()` responses by default
+- All API routes fetching from the torrent service (localhost:3001) were returning cached/stale data
+- SSE progress endpoint was also broken - Next.js was buffering the proxied SSE stream
+- Torrent service was not running (no auto-start mechanism in sandbox)
+- Added `cache: 'no-store'` to ALL fetch calls to the torrent service across 7 API routes
+- Added `export const dynamic = 'force-dynamic'` to /api/torrent/list and /api/torrent/status routes
+- Rewrote /api/torrent/progress/[infoHash] to use ReadableStream with polling instead of proxying SSE
+- Created `ensureTorrentService()` in src/lib/torrent-client.ts that auto-spawns the torrent service as a child process if not running
+- Updated all torrent API routes to call ensureTorrentService() before making requests
+- Fixed torrent service dev script (bun crashes with WebTorrent NAPI modules, changed to node --import tsx --watch)
+- Verified torrent service stays alive and responds correctly
+
+Stage Summary:
+- Fixed: Next.js fetch caching was the primary cause of static stats
+- Fixed: SSE progress endpoint now emits live events via ReadableStream polling
+- Fixed: Torrent service auto-starts on first API request
+- All 7 torrent API routes updated with cache: 'no-store' and ensureTorrentService()
+- Torrent service running stably on port 3001

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSessionUser } from '@/lib/auth'
-import { TORRENT_SERVICE_URL } from '@/lib/torrent-client'
+import { TORRENT_SERVICE_URL, ensureTorrentService } from '@/lib/torrent-client'
+
+export const dynamic = 'force-dynamic'
 
 export async function GET(
   request: NextRequest,
@@ -14,7 +16,10 @@ export async function GET(
   const { infoHash } = await params
 
   try {
-    const res = await fetch(`${TORRENT_SERVICE_URL}/torrent/status/${infoHash}`)
+    await ensureTorrentService()
+    const res = await fetch(`${TORRENT_SERVICE_URL}/torrent/status/${infoHash}`, {
+      cache: 'no-store',
+    })
     const data = await res.json()
     return NextResponse.json(data)
   } catch (err: any) {

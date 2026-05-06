@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getSessionUser } from '@/lib/auth'
-import { TORRENT_SERVICE_URL } from '@/lib/torrent-client'
+import { TORRENT_SERVICE_URL, ensureTorrentService } from '@/lib/torrent-client'
 
 export async function POST(request: NextRequest) {
   const user = await getSessionUser(request)
@@ -10,6 +10,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    await ensureTorrentService()
     const contentType = request.headers.get('content-type') || ''
 
     if (contentType.includes('multipart/form-data')) {
@@ -27,6 +28,7 @@ export async function POST(request: NextRequest) {
         method: 'POST',
         body: buffer,
         headers: { 'Content-Type': 'application/octet-stream' },
+        cache: 'no-store',
       })
 
       if (!res.ok) {
@@ -64,6 +66,7 @@ export async function POST(request: NextRequest) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ magnet }),
+        cache: 'no-store',
       })
 
       if (!res.ok) {
