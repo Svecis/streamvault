@@ -1,0 +1,39 @@
+sveckys.top {
+    # StreamVault - Main Next.js App
+    reverse_proxy localhost:3000
+
+    # Torrent service API - proxied through Next.js API routes
+    # (handled internally by Next.js API routes which forward to port 3001)
+
+    # Security headers
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+    }
+
+    # Static assets caching
+    handle_path /_next/static/* {
+        reverse_proxy localhost:3000
+        header Cache-Control "public, max-age=31536000, immutable"
+    }
+
+    # Upload size limit (8GB for video files)
+    request_body {
+        max_size 8GB
+    }
+
+    # Logging
+    log {
+        output file /var/log/caddy/streamvault.log {
+            roll_size 50mb
+            roll_keep 5
+        }
+    }
+}
+
+# Redirect www to bare domain
+www.sveckys.top {
+    redir https://sveckys.top{uri} permanent
+}

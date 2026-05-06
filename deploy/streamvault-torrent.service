@@ -1,0 +1,39 @@
+[Unit]
+Description=StreamVault - WebTorrent Service
+After=network.target
+
+[Service]
+Type=simple
+User=streamvault
+Group=streamvault
+WorkingDirectory=/opt/streamvault/mini-services/torrent-service
+ExecStart=/home/streamvault/.bun/bin/bun run index.ts
+Restart=on-failure
+RestartSec=10
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+# Environment
+Environment=PORT=3001
+Environment=TORRENT_DIR=/opt/streamvault/torrents
+Environment=NODE_ENV=production
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/streamvault/torrents
+PrivateTmp=true
+
+# Resource limits (WebTorrent can be memory-hungry)
+LimitNOFILE=65536
+MemoryMax=3G
+CPUQuota=150%
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=streamvault-torrent
+
+[Install]
+WantedBy=multi-user.target

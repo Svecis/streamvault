@@ -2,7 +2,8 @@
   "name": "torrent-service",
   "type": "module",
   "scripts": {
-    "dev": "node --watch index.ts"
+    "dev": "node --watch index.ts",
+    "start": "bun run index.ts"
   },
   "dependencies": {
     "webtorrent": "^2.8.5",
