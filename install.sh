@@ -121,6 +121,7 @@ mkdir -p /var/log/caddy
 chown -R ${APP_USER}:${APP_USER} "${APP_DIR}/uploads"
 chown -R ${APP_USER}:${APP_USER} "${APP_DIR}/torrents"
 chown -R ${APP_USER}:${APP_USER} "${APP_DIR}/db"
+chown -R caddy:caddy /var/log/caddy
 
 # ── 8. Environment Configuration ─────────────────────────────────────────────
 # Generate a random secret
